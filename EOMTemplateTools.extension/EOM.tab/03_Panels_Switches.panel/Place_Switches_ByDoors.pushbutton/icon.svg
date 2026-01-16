@@ -1,0 +1,8 @@
+<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#50E3C2" rx="8"/>
+  <!-- Light switch icon -->
+  <rect x="22" y="18" width="20" height="28" fill="white" rx="2"/>
+  <!-- Switch in ON position -->
+  <rect x="28" y="24" width="8" height="14" fill="#50E3C2" rx="2"/>
+  <circle cx="32" cy="28" r="2" fill="white"/>
+</svg>

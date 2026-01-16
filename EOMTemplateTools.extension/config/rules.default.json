@@ -1,0 +1,471 @@
+﻿{
+    "wet_raycast_slack_mm":  400,
+    "kitchen_validate_match_tol_mm":  2000,
+    "ac_perpendicular_tolerance":  0.29999999999999999,
+    "lift_shaft_wall_search_mm":  1000,
+    "entrance_light_dedupe_radius_mm":  500,
+    "intercom_keywords":  [
+                              "домоф",
+                              "intercom"
+                          ],
+    "ac_allow_facade_wall_last_resort":  false,
+    "entrance_apartment_room_name_patterns":  [
+                                                  "квартир",
+                                                  "прихож",
+                                                  "кухн",
+                                                  "спальн",
+                                                  "гостин",
+                                                  "комнат",
+                                                  "жил",
+                                                  "детск",
+                                                  "кабин",
+                                                  "клад",
+                                                  "гардер",
+                                                  "сан",
+                                                  "с/у",
+                                                  "ванн",
+                                                  "душ",
+                                                  "wc",
+                                                  "toilet",
+                                                  "bath",
+                                                  "bedroom",
+                                                  "living"
+                                              ],
+    "wet_wm_shift_towards_bath_mm":  300,
+    "kitchen_stove_offset_mm":  600,
+    "ac_room_touch_boundary_mm":  600,
+    "lift_shaft_edge_offset_mm":  500,
+    "ac_perp_angle_weight_mm":  2000,
+    "lift_shaft_family_names":  [
+                                    "130_Лифт_2D",
+                                    "Лифт_1700х1700",
+                                    "Лифт_2600х1700_Широкий",
+                                    "Лифт_2600х1700_Узкий"
+                                ],
+    "exclude_room_name_keywords":  [
+                                       "ниша",
+                                       "niche"
+                                   ],
+    "switch_offset_from_jamb_mm":  150,
+    "scan_limit_doors":  500,
+    "socket_ac_offset_from_corner_mm":  200,
+    "low_voltage_cabinet_keywords":  [
+                                         "сск",
+                                         "сс короб",
+                                         "слаботоч",
+                                         "щит сс",
+                                         "шкаф сс",
+                                         "router",
+                                         "роутер"
+                                     ],
+    "entrance_inside_room_name_patterns":  [
+                                               "тамбур",
+                                               "вестиб",
+                                               "холл",
+                                               "лестн",
+                                               "корид",
+                                               "прихож",
+                                               "подъезд",
+                                               "тбо",
+                                               "hall",
+                                               "corridor",
+                                               "lobby",
+                                               "stair"
+                                           ],
+    "ac_perp_dot_max":  0.5,
+    "wc_room_name_patterns":  [
+                                  "сануз",
+                                  "с/у",
+                                  "туал",
+                                  "wc",
+                                  "toilet"
+                              ],
+    "entrance_light_above_door_offset_mm":  200,
+    "kitchen_sink_offset_mm":  600,
+    "ac_basket_family_keywords":  [
+                                      "корзина",
+                                      "basket",
+                                      "external unit",
+                                      "внешний блок"
+                                  ],
+    "avoid_radiator_mm":  500,
+    "wet_wm_enforce_bbox":  true,
+    "kitchen_validate_offset_tol_mm":  100,
+    "kitchen_room_name_patterns":  [
+                                       "кухн",
+                                       "kitchen",
+                                       "столов"
+                                   ],
+    "kitchen_stove_clear_mm":  600,
+    "fridge_family_keywords":  [
+                                   "холод",
+                                   "холодил",
+                                   "fridge",
+                                   "refriger",
+                                   "freezer"
+                               ],
+    "low_voltage_search_radius_mm":  1500,
+    "ac_validate_basket_max_dist_mm":  2000,
+    "socket_dedupe_radius_mm":  300,
+    "switch_allow_point_fallback":  true,
+    "wet_fallback_step_mm":  500,
+    "ac_wall_search_max_dist_mm":  2500,
+    "lift_shaft_dedupe_radius_mm":  500,
+    "wet_socket_dedupe_radius_mm":  50,
+    "switch_technical_level_name_patterns":  [
+                                                 "тех",
+                                                 "technical"
+                                             ],
+    "stove_mark_keywords":  [
+                                "эп"
+                            ],
+    "entrance_light_outside_offset_mm":  150,
+    "comment_tag":  "AUTO_EOM",
+    "panel_shk_variant_param":  "Бокс ЩРВ-П-18 модулей навесной пластик IP41 LIGHT IEK",
+    "entrance_door_name_patterns":  [
+                                        "вход",
+                                        "входн",
+                                        "entry",
+                                        "entrance",
+                                        "тамбур",
+                                        "вестиб"
+                                    ],
+    "switch_wet_room_name_patterns":  [
+                                          "сануз",
+                                          "с/у",
+                                          "туал",
+                                          "wc",
+                                          "ванн",
+                                          "душ"
+                                      ],
+    "min_light_spacing_mm":  800,
+    "hallway_room_name_patterns":  [
+                                       "прихож",
+                                       "холл",
+                                       "hall"
+                                   ],
+    "family_type_names":  {
+                              "socket_general":  [
+                                                     "TSL_EF_t_CT_b_IP20_P3t_1P+N+PE",
+                                                     "TSL_EF_t_CT_b_IP20_P3t_1P+N+PE_2п"
+                                                 ],
+                              "socket_kitchen_unit":  [
+                                                          "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п",
+                                                          "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE"
+                                                      ],
+                              "light_lift_shaft":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "pk_indicator":  "TSL_SHM_УГО_ПК",
+                              "socket_low_voltage":  [
+                                                         "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
+                                                         "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
+                                                     ],
+                              "light_ceiling_terminal":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "socket_intercom":  [
+                                                      "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
+                                                      "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
+                                                  ],
+                              "panel_shk":  "Бокс ЩРВ-П-18 модулей навесной пластик IP41 LIGHT IEK",
+                              "switch_1g_ip44":  [
+                                                     "TSL_LD_т_СТ_н_IP44_Вкл_1P_1кл"
+                                                 ],
+                              "power_socket":  [
+                                                   "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
+                                                   "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
+                                               ],
+                              "socket_kitchen_general":  [
+                                                             "TSL_EF_t_CT_b_IP20_P3t_1P+N+PE"
+                                                         ],
+                              "light_wall_bath":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "switch_1g":  [
+                                                "TSL_LD_т_СТ_в_IP20_Вкл_1P_1кл"
+                                            ],
+                              "light_wall_wc":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "socket_router":  [
+                                                    "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
+                                                    "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
+                                                ],
+                              "switch":  [
+                                             "TSL_LD_т_СТ_в_IP20_Вкл_1P_1кл"
+                                         ],
+                              "shdup":  [
+                                            "TSL_EF_э_ПС_КР (нагрузка) : TSL_EF_э_ПС_КР (нагрузка)",
+                                            "TSL_EF_э_ПС_КР (изменение напряжения) : 230 В"
+                                        ],
+                              "light_entrance_door_outside":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "switch_2g":  [
+                                                "TSL_LD_т_СТ_в_IP20_Вкл_1P_2кл"
+                                            ],
+                              "socket_wet":  [
+                                                 "TSL_EF_т_СТ_н_IP44_Рзт_1P+N+PE_2п",
+                                                 "TSL_EF_т_СТ_н_IP44_Рзт_1P+N+PE",
+                                                 "IP44"
+                                             ],
+                              "socket_ac":  [
+                                                "TSL_EF_t_CT_b_IP20_P3t_1P+N+PE"
+                                            ],
+                              "light_ceiling_point":  "TSL_LF_э_ПЛ_Патрон (нагрузка)"
+                          },
+    "outside_room_name_patterns":  [
+                                       "улиц",
+                                       "наруж",
+                                       "внеш",
+                                       "внеквартир",
+                                       "лифтов",
+                                       "лестнич",
+                                       "лестн",
+                                       "street",
+                                       "outside",
+                                       "exterior"
+                                   ],
+    "bath_room_name_patterns":  [
+                                    "ванн",
+                                    "душ",
+                                    "bath"
+                                ],
+    "sink_mark_keywords":  [
+                               "мк",
+                               "mk"
+                           ],
+    "wc_light_above_door_offset_mm":  200,
+    "wet_save_room_screens":  true,
+    "wet_slide_max_mm":  2400,
+    "wet_sink_clear_mm":  600,
+    "kitchen_unit_height_mm":  1100,
+    "switch_technical_room_name_patterns":  [
+                                                "техэтаж",
+                                                "техничес",
+                                                "итп",
+                                                "электрощ",
+                                                "щитовая",
+                                                "серверн",
+                                                "насосн"
+                                            ],
+    "sink_family_keywords":  [
+                                 "раков",
+                                 "умыв",
+                                 "мойк",
+                                 "sink",
+                                 "washbasin",
+                                 "lavatory"
+                             ],
+    "kitchen_general_height_mm":  300,
+    "low_voltage_intercom_height_mm":  1400,
+    "light_ceiling_room_name_patterns":  [
+                                             "кухн",
+                                             "прихож",
+                                             "корид",
+                                             "холл",
+                                             "тамбур",
+                                             "клад",
+                                             "гардер",
+                                             "hall",
+                                             "corridor",
+                                             "балкон",
+                                             "лодж",
+                                             "loggia",
+                                             "balcony"
+                                         ],
+    "switch_auto_link_scan_limit_doors":  200,
+    "ac_room_exclude_name_patterns":  [
+                                          "балкон",
+                                          "лодж",
+                                          "loggia",
+                                          "balcony",
+                                          "сануз",
+                                          "с/у",
+                                          "туал",
+                                          "wc",
+                                          "ванн",
+                                          "душ",
+                                          "bath",
+                                          "toilet",
+                                          "постироч",
+                                          "прихож",
+                                          "корид",
+                                          "холл",
+                                          "hall",
+                                          "corridor",
+                                          "тамбур",
+                                          "клад",
+                                          "гардер",
+                                          "storage"
+                                      ],
+    "bath_sink_height_mm":  2000,
+    "lift_shaft_room_name_patterns":  [
+                                          "лифт",
+                                          "лифтов",
+                                          "шахт",
+                                          "elevator",
+                                          "lift",
+                                          "shaft"
+                                      ],
+    "wet_mark_screens":  true,
+    "two_lights_min_area_m2":  24,
+    "two_lights_min_span_mm":  7000,
+    "wet_use_screenshot_scoring":  true,
+    "lift_shaft_light_height_mm":  2500,
+    "avoid_door_mm":  300,
+    "washing_machine_keywords":  [
+                                     "стирал",
+                                     "washing",
+                                     "machine"
+                                 ],
+    "wet_wm_wall_max_dist_mm":  1200,
+    "ac_socket_avoid_external_wall":  true,
+    "wet_ink_radius_mm":  250,
+    "ac_perp_dot_strict":  0.14999999999999999,
+    "ac_room_hard_max_dist_mm":  3000,
+    "wet_wall_end_clear_mm":  100,
+    "light_terminal_room_name_patterns":  [
+                                              "спальн",
+                                              "гостин",
+                                              "комнат",
+                                              "жил",
+                                              "living",
+                                              "bedroom"
+                                          ],
+    "debug_section_half_height_mm":  1500,
+    "kitchen_total_sockets":  4,
+    "ac_facade_dir_hint_min_align":  0.5,
+    "door_head_height_mm":  2100,
+    "host_wall_search_mm":  300,
+    "ac_basket_bbox_z_tol_mm":  1500,
+    "wet_room_name_patterns":  [
+                                   "сануз",
+                                   "с/у",
+                                   "туал",
+                                   "wc",
+                                   "ванн",
+                                   "душ",
+                                   "постироч"
+                               ],
+    "socket_height_mm":  300,
+    "kitchen_wall_end_clear_mm":  100,
+    "roof_exit_door_name_patterns":  [
+                                         "кровл",
+                                         "roof",
+                                         "выход на кровлю"
+                                     ],
+    "entrance_level_name_patterns":  [
+                                         "э1",
+                                         "±0.000",
+                                         "+0.000",
+                                         "0.000",
+                                         "перв"
+                                     ],
+    "light_center_room_height_mm":  2700,
+    "pk_hydrant_keywords":  [
+                                "пожарный кран",
+                                "пож. кран",
+                                "пожарн кран",
+                                "пожарный шкаф",
+                                "кран пожарный",
+                                "пк",
+                                "п/к",
+                                "fire hose",
+                                "fire hydrant",
+                                "hydrant",
+                                "hose reel",
+                                "fire hose cabinet"
+                            ],
+    "pk_hydrant_exclude_keywords":  [
+                                        "пкс",
+                                        "перекрест",
+                                        "перекл",
+                                        "переключатель"
+                                    ],
+    "pk_scan_limit":  3000,
+    "pk_dedupe_radius_mm":  300,
+    "pk_level_z_tol_mm":  4000,
+    "pk_sign_height_mm":  2300,
+    "switch_corridor_room_name_patterns":  [
+                                               "прихож",
+                                               "корид",
+                                               "холл",
+                                               "тамбур",
+                                               "лестн",
+                                               "моп"
+                                           ],
+    "entrance_light_scan_limit_doors":  500,
+    "lift_shaft_min_wall_clearance_mm":  300,
+    "switch_two_gang_room_name_patterns":  [
+                                               "спальн",
+                                               "гостин",
+                                               "жил",
+                                               "комнат",
+                                               "living",
+                                               "bedroom"
+                                           ],
+    "wet_show_screens_in_output":  true,
+    "switch_level_z_tol_mm":  1500,
+    "kitchen_sink_clear_mm":  600,
+    "bath_wc_above_door_inset_mm":  200,
+    "kitchen_validate_height_tol_mm":  20,
+    "wet_wm_shift_away_from_door_trigger_mm":  700,
+    "socket_ac_height_from_ceiling_mm":  300,
+    "scan_limit_rooms":  5000,
+    "ac_max_sockets_per_basket":  2,
+    "roof_room_name_patterns":  [
+                                    "кровл",
+                                    "roof"
+                                ],
+    "lift_shaft_generic_model_exclude_patterns":  [
+                                                      "машин",
+                                                      "machine"
+                                                  ],
+    "switch_allow_auto_pick_fallback":  true,
+    "batch_size":  25,
+    "enable_existing_dedupe":  false,
+    "lift_shaft_min_height_mm":  2000,
+    "switch_min_dist_to_door_axis_mm":  120,
+    "ac_basket_merge_mm":  200,
+    "wet_bath_clear_mm":  600,
+    "socket_spacing_mm":  3000,
+    "wet_show_screens_limit":  0,
+    "wet_wm_shift_away_from_door_mm":  300,
+    "panel_recess_mm":  40,
+    "low_voltage_router_height_mm":  300,
+    "kitchen_fridge_max_dist_mm":  1500,
+    "panel_above_door_offset_mm":  300,
+    "lift_shaft_room_exclude_patterns":  [
+                                             "машин",
+                                             "machine"
+                                         ],
+    "ac_force_perpendicular_wall":  true,
+    "kitchen_validate_wall_dist_mm":  150,
+    "kitchen_fixture_wall_max_dist_mm":  2000,
+    "wet_slide_step_mm":  300,
+    "lift_shaft_generic_model_keywords":  [
+                                              "лифт",
+                                              "лифтов",
+                                              "шахт",
+                                              "elevator",
+                                              "lift",
+                                              "shaft"
+                                          ],
+    "stove_family_keywords":  [
+                                  "плит",
+                                  "вароч",
+                                  "электроплит",
+                                  "cooktop",
+                                  "stove",
+                                  "oven",
+                                  "range",
+                                  "hob"
+                              ],
+    "socket_height_wet_mm":  1300,
+    "entrance_public_room_name_patterns":  [
+                                               "внеквартир",
+                                               "корид",
+                                               "холл",
+                                               "лестн",
+                                               "лифтов",
+                                               "тамбур",
+                                               "вестиб",
+                                               "подъезд",
+                                               "тбо",
+                                               "lobby",
+                                               "stair"
+                                           ],
+    "switch_height_mm":  900
+}

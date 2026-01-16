@@ -1,0 +1,4 @@
+﻿title: "🧰 Исправить: ЩК только 18 модулей"
+tooltip: "For ShK panels placed by EOM tools: disables the '-4 modules' option in the type and keeps only '-18 modules'."
+author: "EOM Template Tools"
+

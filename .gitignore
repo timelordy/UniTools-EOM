@@ -1,0 +1,48 @@
+Thumbs.db
+Desktop.ini
+
+# Python (for local editing only)
+# AI/LLM context files (not needed in repo)
+CONTINUITY.md
+PRD.md
+.claude/
+
+# Debug/diagnostic data exports
+*.csv
+door_*.json
+
+# Temporary patch/fix scripts
+apply_fix.ps1
+apply_fix.py
+apply_patch.ps1
+patch_ac.py
+check_chars.py
+create_icons.py
+1.txt
+
+# Backup and debug files
+*_backup.py
+*_backup_*.py
+diagnostic.py
+**/diagnostic.py
+
+# Dev notes/fix documentation (keep main README only)
+**/*FIX*.md
+**/FIXES.md
+**/FIXED*.md
+
+__pycache__/
+*.pyc
+*.pyo
+
+# JetBrains / VSCode
+.idea/
+.vscode/
+
+# OS / temp
+*.log
+*.tmp
+*.bak
+
+# pyRevit cache/output (do not commit)
+**/pyrevit_output.txt

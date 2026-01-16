@@ -1,0 +1,33 @@
+- Goal (критерии успеха):
+  - Найти в интернете практики построения «офигенных» агентов и на их основе спроектировать для пользователя рабочий пайплайн взаимодействия со мной; текущий пайплайн сохранить/забэкапить.
+- Constraints/Assumptions:
+  - Использовать web.run для поиска актуальных практик.
+  - Сохранять/обновлять CONTINUITY.md при изменениях состояния.
+  - Репозиторий: c:\Users\anton\EOMTemplateTools\EOMTemplateTools.extension.
+  - Пользователь просит выполнять редактирование в папке c:\Users\anton\.codex.
+- Key decisions:
+  - Пока нет.
+- State:
+   - Done:
+     - Прочитан CONTINUITY.md и получены требования пользователя.
+     - Найдено расположение c:\Users\anton\.codex и файл AGENTS.md там.
+     - Прочитан c:\Users\anton\.codex\AGENTS.md (инструкции совпадают с текущими).
+     - Веб‑поиск практик агентных пайплайнов; ссылка chatgpt.com/share недоступна без логина.
+     - Попытка поиска pipeline/workflow в c:\Users\anton\.codex завершилась таймаутом из‑за больших session‑логов.
+     - Сделан бэкап c:\Users\anton\.codex\AGENTS.md -> AGENTS.md.bak-2026-01-12.
+     - Обновлён c:\Users\anton\.codex\AGENTS.md: добавлен раздел Agent Pipeline (Operating System).
+     - Попытка прочитать C:\Users\anton\Desktop\1.txt не удалась: файл не найден.
+   - Now:
+     - Уточнить расположение файла 1.txt с воркфлоу (Desktop vs OneDrive Desktop).
+     - Собрать обратную связь по новому пайплайну и уточнить формат/детали.
+   - Next:
+     - При необходимости расширить систему отдельными файлами/шаблонами (PIPELINE.md, чек‑листы).
+- Open questions (UNCONFIRMED если нужно):
+  - Где и в каком виде сейчас хранится «нынешний пайплайн» в c:\Users\anton\.codex? (UNCONFIRMED)
+  - Нужно ли оформить результат как AGENTS/процедуры/скрипты в репозитории? (UNCONFIRMED)
+  - Можешь прислать содержимое чата по ссылке (или краткое резюме), т.к. страница требует логина? (UNCONFIRMED)
+  - Точный путь к файлу 1.txt (Desktop или OneDrive\Desktop)? (UNCONFIRMED)
+- Working set (files/ids/commands):
+  - CONTINUITY.md
+  - c:\Users\anton\.codex\AGENTS.md
+  - c:\Users\anton\.codex\AGENTS.md.bak-2026-01-12

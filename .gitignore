@@ -1,0 +1,19 @@
+Thumbs.db
+Desktop.ini
+
+# Python (for local editing only)
+__pycache__/
+*.pyc
+*.pyo
+
+# JetBrains / VSCode
+.idea/
+.vscode/
+
+# OS / temp
+*.log
+*.tmp
+*.bak
+
+# pyRevit cache/output (do not commit)
+**/pyrevit_output.txt

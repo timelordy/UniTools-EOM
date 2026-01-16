@@ -1,0 +1,10 @@
+<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" fill="#7ED321" rx="8"/>
+  <!-- Electrical panel icon -->
+  <rect x="16" y="14" width="32" height="36" fill="white" stroke="#7ED321" stroke-width="2" rx="2"/>
+  <rect x="20" y="20" width="10" height="8" fill="#7ED321"/>
+  <rect x="34" y="20" width="10" height="8" fill="#7ED321"/>
+  <rect x="20" y="32" width="10" height="8" fill="#7ED321"/>
+  <rect x="34" y="32" width="10" height="8" fill="#7ED321"/>
+  <rect x="16" y="51" width="32" height="2" fill="white"/>
+</svg>

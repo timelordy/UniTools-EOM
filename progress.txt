@@ -24,3 +24,19 @@
    - pyRevit uses IronPython 2.7 but tests run on Python 3.x
    - CI will run on GitHub Actions with Python 3.11
  ---
+ 
+ ## 2026-01-17 - US-001 through US-006 (Tests)
+ - Implemented comprehensive test suite
+ - Files created:
+   - tests/test_utils_units.py - 17 tests for unit conversion
+   - tests/test_config_loader.py - 8 tests for config loading
+   - tests/test_pk_indicator_rules.py - expanded to 20+ tests
+   - tests/test_text_utils.py - 25 tests for text utilities
+   - tests/conftest.py - pytest fixtures for shared test data
+   - EOMTemplateTools.extension/lib/text_utils.py - extracted pure functions
+ - Updated .github/workflows/ci.yml with coverage threshold (50%)
+ - **Learnings for future iterations:**
+   - socket_utils.py depends on pyrevit/Revit API - cannot test without mocking
+   - Extracted testable pure functions to text_utils.py
+   - Use conftest.py fixtures for reusable test data
+ ---

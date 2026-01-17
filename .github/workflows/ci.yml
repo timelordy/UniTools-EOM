@@ -30,4 +30,12 @@
        
        - name: Run pytest
          run: |
-           pytest tests/ --cov=EOMTemplateTools.extension/lib --cov-report=term-missing
+          pytest tests/ -v --cov=EOMTemplateTools.extension/lib --cov-report=term-missing --cov-report=html --cov-fail-under=50
+      
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: htmlcov/
+          retention-days: 7

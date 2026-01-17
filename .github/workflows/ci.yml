@@ -28,9 +28,13 @@
          run: |
            flake8 EOMTemplateTools.extension/lib/ tests/
        
+      - name: Run mypy
+        run: |
+          mypy EOMTemplateTools.extension/lib/utils_units.py EOMTemplateTools.extension/lib/text_utils.py EOMTemplateTools.extension/lib/config_loader.py EOMTemplateTools.extension/lib/pk_indicator_rules.py
+      
        - name: Run pytest
          run: |
-          pytest tests/ -v --cov=EOMTemplateTools.extension/lib --cov-report=term-missing --cov-report=html --cov-fail-under=50
+          pytest tests/ -v --cov=EOMTemplateTools.extension/lib --cov-report=term-missing --cov-report=html --cov-fail-under=80
       
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

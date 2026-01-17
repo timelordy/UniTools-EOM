@@ -1,44 +1,18 @@
 {
   "project": "EOMTemplateTools",
-  "branchName": "ralph/add-tests",
-  "description": "Add comprehensive unit tests for all testable library modules",
+  "branchName": "ralph/senior-level",
+  "description": "Upgrade project to Senior-level: type hints, high coverage, docs, releases",
   "userStories": [
-    {
-      "id": "US-001",
-      "title": "Add tests for utils_units.py",
-      "passes": true,
-      "priority": 1
-    },
-    {
-      "id": "US-002",
-      "title": "Add tests for config_loader.py",
-      "passes": true,
-      "priority": 2
-    },
-    {
-      "id": "US-003",
-      "title": "Expand tests for pk_indicator_rules.py",
-      "passes": true,
-      "priority": 3
-    },
-    {
-      "id": "US-004",
-      "title": "Add tests for pure functions in socket_utils.py",
-      "passes": true,
-      "priority": 4,
-      "notes": "Created text_utils.py module with extracted pure functions"
-    },
-    {
-      "id": "US-005",
-      "title": "Add pytest fixtures and conftest.py",
-      "passes": true,
-      "priority": 5
-    },
-    {
-      "id": "US-006",
-      "title": "Update CI to show coverage report",
-      "passes": true,
-      "priority": 6
-    }
+    {"id": "US-001", "title": "Add type hints to utils_units.py", "passes": true, "priority": 1},
+    {"id": "US-002", "title": "Add type hints to text_utils.py", "passes": true, "priority": 2},
+    {"id": "US-003", "title": "Add type hints to config_loader.py", "passes": true, "priority": 3},
+    {"id": "US-004", "title": "Add type hints to pk_indicator_rules.py", "passes": true, "priority": 4},
+    {"id": "US-005", "title": "Add mypy configuration and CI check", "passes": true, "priority": 5},
+    {"id": "US-006", "title": "Increase test coverage to 80%+", "passes": true, "priority": 6},
+    {"id": "US-007", "title": "Create Revit API mock module", "passes": true, "priority": 7},
+    {"id": "US-008", "title": "Add CHANGELOG.md", "passes": true, "priority": 8},
+    {"id": "US-009", "title": "Add semantic versioning", "passes": true, "priority": 9},
+    {"id": "US-010", "title": "Add docstrings to all public functions", "passes": true, "priority": 10},
+    {"id": "US-011", "title": "Add GitHub Release workflow", "passes": true, "priority": 11}
   ]
 }

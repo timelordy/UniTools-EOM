@@ -1,24 +1,58 @@
  # -*- coding: utf-8 -*-
- """Pure text processing utilities (no Revit dependencies).
+"""Pure text processing utilities (no Revit dependencies).
+
+These functions are extracted for testability and reuse.
+They handle text normalization, interval operations, and keyword matching.
+
+Example:
+    >>> from text_utils import norm, text_has_any_keyword
+    >>> norm("  Hello World  ")
+    'hello world'
+    >>> text_has_any_keyword("Пожарный кран ПК", ["пк"])
+    True
+"""
+import re
+from typing import List, Optional, Tuple
  
- These functions are extracted for testability and reuse.
- """
- import re
  
- 
- def norm(text):
-     """Normalize text: strip whitespace and lowercase."""
+def norm(text: Optional[str]) -> str:
+    """Normalize text: strip whitespace and lowercase.
+
+    Args:
+        text: Input text to normalize. If None, returns empty string.
+
+    Returns:
+        Normalized lowercase string with stripped whitespace.
+
+    Examples:
+        >>> norm("  Hello World  ")
+        'hello world'
+        >>> norm(None)
+        ''
+    """
      try:
          return (text or u'').strip().lower()
      except Exception:
          return u''
  
  
- def norm_type_key(s):
-     """Normalize family type name for comparison.
-     
-     Handles Cyrillic/Latin lookalikes, various dash types, whitespace normalization.
-     """
+def norm_type_key(s: Optional[str]) -> str:
+    """Normalize family type name for comparison.
+
+    Handles Cyrillic/Latin lookalikes, various dash types, whitespace normalization.
+    Used for fuzzy matching of Revit family type names across different encodings.
+
+    Args:
+        s: Family type name string to normalize.
+
+    Returns:
+        Normalized string with underscores instead of spaces,
+        Cyrillic chars replaced with Latin equivalents.
+
+    Examples:
+        >>> norm_type_key("TSL_EF Socket : Type 01")
+        'tsl_ef_socket:type_01'
+    """
      t = norm(s)
      if not t:
          return t
@@ -70,17 +104,25 @@
      return t
  
  
- def merge_intervals(intervals, lo, hi):
-     """Merge overlapping intervals within [lo, hi] range.
-     
-     Args:
-         intervals: List of (start, end) tuples
-         lo: Lower bound
-         hi: Upper bound
-         
-     Returns:
-         List of merged (start, end) tuples within bounds
-     """
+def merge_intervals(
+    intervals: List[Tuple[float, float]], lo: float, hi: float
+) -> List[Tuple[float, float]]:
+    """Merge overlapping intervals within [lo, hi] range.
+
+    Args:
+        intervals: List of (start, end) tuples representing intervals.
+        lo: Lower bound of the range to consider.
+        hi: Upper bound of the range to consider.
+
+    Returns:
+        List of merged (start, end) tuples within bounds, sorted by start.
+
+    Examples:
+        >>> merge_intervals([(1, 3), (2, 4)], 0, 10)
+        [(1, 4)]
+        >>> merge_intervals([(1, 2), (3, 4)], 0, 10)
+        [(1, 2), (3, 4)]
+    """
      out = []
      if hi <= lo:
          return out
@@ -110,17 +152,24 @@
      return out
  
  
- def invert_intervals(blocked, lo, hi):
-     """Get free intervals by inverting blocked intervals within [lo, hi].
-     
-     Args:
-         blocked: List of (start, end) blocked intervals (must be sorted and merged)
-         lo: Lower bound
-         hi: Upper bound
-         
-     Returns:
-         List of free (start, end) intervals
-     """
+def invert_intervals(
+    blocked: List[Tuple[float, float]], lo: float, hi: float
+) -> List[Tuple[float, float]]:
+    """Get free intervals by inverting blocked intervals within [lo, hi].
+
+    Args:
+        blocked: List of (start, end) blocked intervals.
+            Should be sorted and non-overlapping for correct results.
+        lo: Lower bound of the range.
+        hi: Upper bound of the range.
+
+    Returns:
+        List of free (start, end) intervals not covered by blocked.
+
+    Examples:
+        >>> invert_intervals([(2, 4), (6, 8)], 0, 10)
+        [(0, 2), (4, 6), (8, 10)]
+    """
      out = []
      cur = lo
      
@@ -137,19 +186,25 @@
      return out
  
  
- def text_has_any_keyword(norm_text, keys):
-     """Check if normalized text contains any keyword.
-     
-     Short keywords (<=2 chars) are matched as tokens, not substrings,
-     to avoid false positives like 'пк' in 'пкс'.
-     
-     Args:
-         norm_text: Text to search in (will be normalized)
-         keys: List of keywords to search for
-         
-     Returns:
-         True if any keyword is found
-     """
+def text_has_any_keyword(norm_text: Optional[str], keys: Optional[List[str]]) -> bool:
+    """Check if normalized text contains any keyword.
+
+    Short keywords (<=2 chars) are matched as tokens, not substrings,
+    to avoid false positives like 'пк' matching 'пкс'.
+
+    Args:
+        norm_text: Text to search in (will be normalized).
+        keys: List of keywords to search for.
+
+    Returns:
+        True if any keyword is found in the text.
+
+    Examples:
+        >>> text_has_any_keyword("Пожарный кран ПК", ["пк"])
+        True
+        >>> text_has_any_keyword("ПКСМ", ["пк"])
+        False
+    """
      try:
          t = norm(norm_text)
      except Exception:

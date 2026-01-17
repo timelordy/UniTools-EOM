@@ -40,3 +40,26 @@
    - Extracted testable pure functions to text_utils.py
    - Use conftest.py fixtures for reusable test data
  ---
+
+## 2026-01-17 - US-001 through US-011 (Senior Level)
+- Implemented Senior-level features
+- Type hints added to:
+  - utils_units.py
+  - text_utils.py
+  - config_loader.py
+  - pk_indicator_rules.py
+- Files created/updated:
+  - py.typed marker for PEP 561
+  - __init__.py with __version__ = "0.2.0"
+  - CHANGELOG.md with Keep a Changelog format
+  - .github/workflows/release.yml for automated releases
+  - tests/mocks/revit_api.py - Mock Revit API classes
+  - tests/test_revit_mocks.py - Tests for mocks
+- CI updates:
+  - mypy type checking step
+  - Coverage threshold raised to 80%
+- **Learnings:**
+  - Revit-dependent modules (socket_utils, link_reader, etc.) excluded from mypy
+  - Mocks enable testing geometry logic without Revit
+  - Google-style docstrings with Examples sections
+---

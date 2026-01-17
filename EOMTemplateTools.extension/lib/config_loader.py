@@ -1,23 +1,60 @@
 # -*- coding: utf-8 -*-
+"""Configuration loader for EOM Template Tools.
 
+Loads rules from JSON configuration files with sensible defaults
+for all settings. Handles UTF-8 and BOM encoding issues common
+in Windows/pyRevit environments.
+
+Example:
+    >>> from config_loader import load_rules
+    >>> rules = load_rules()
+    >>> rules['comment_tag']
+    'AUTO_EOM'
+"""
 import io
 import json
 import os
+from typing import Any, Dict, List, Optional
+
+# Type alias for rules dictionary
+RulesDict = Dict[str, Any]
 
 
-def _extension_root_from_lib():
-    # lib/<thisfile> -> extension_root
+def _extension_root_from_lib() -> str:
+    """Get extension root directory from lib location."""
     return os.path.dirname(os.path.dirname(__file__))
 
 
-def get_default_rules_path():
+def get_default_rules_path() -> str:
+    """Get the path to the default rules configuration file.
+
+    Returns:
+        Absolute path to config/rules.default.json.
+    """
     return os.path.join(_extension_root_from_lib(), 'config', 'rules.default.json')
 
 
-def load_rules(path=None):
-    """Load rules JSON.
+def load_rules(path: Optional[str] = None) -> RulesDict:
+    """Load rules from JSON configuration file.
 
-    If `path` is None uses extension `config/rules.default.json`.
+    Loads configuration and applies default values for any missing keys.
+    Handles various encoding issues (UTF-8, BOM) common in Windows.
+
+    Args:
+        path: Path to JSON config file. If None, uses default rules file.
+
+    Returns:
+        Dictionary with all configuration keys, defaults applied.
+
+    Raises:
+        Exception: If the JSON file cannot be read or parsed.
+
+    Examples:
+        >>> rules = load_rules()
+        >>> rules['comment_tag']
+        'AUTO_EOM'
+        >>> rules['light_center_room_height_mm']
+        2700
     """
     rules_path = path or get_default_rules_path()
     try:

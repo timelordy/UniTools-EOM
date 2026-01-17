@@ -63,3 +63,25 @@
   - Mocks enable testing geometry logic without Revit
   - Google-style docstrings with Examples sections
 ---
+
+## 2026-01-17 - Undo/Rollback Feature
+- Created lib/rollback_utils.py:
+  - parse_tag() - parse AUTO_EOM:TOOL:TIMESTAMP format
+  - generate_tag() - create new tags with timestamps
+  - find_tagged_elements() - find elements by tag
+  - get_unique_tags() - list all tags with counts
+  - delete_elements() - delete with transaction
+  - delete_by_tool() - delete by tool name
+  - delete_all_auto_eom() - delete all AUTO_EOM elements
+- Created 99_Maintenance.panel/Undo_Placement.pushbutton:
+  - Shows list of AUTO_EOM tags in model
+  - Allows selecting which to delete
+  - Confirmation before deletion
+- Created 99_Maintenance.panel/Delete_All_AutoEOM.pushbutton:
+  - Requires typing "УДАЛИТЬ" to confirm
+  - Shows summary of what will be deleted
+- Created tests/test_rollback_utils.py with 15+ tests
+- **Learnings:**
+  - Tag format: AUTO_EOM:TOOL:YYYYMMDD_HHMMSS
+  - Use Ctrl+Z to undo deletions before save
+---

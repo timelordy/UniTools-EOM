@@ -1,0 +1,122 @@
+{
+  "project": "EOMTemplateTools",
+  "branchName": "ralph/ci-cd-pipeline",
+  "description": "Add CI/CD pipeline with linting, type checking, and automated tests for pyRevit extension",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add pyproject.toml with dev dependencies",
+      "description": "As a developer, I need project configuration with linting and testing tools defined.",
+      "acceptanceCriteria": [
+        "Create pyproject.toml with project metadata",
+        "Add dev dependencies: pytest, flake8, mypy, black, isort",
+        "Configure tool settings (line length 120, Python 2.7 compatibility for pyRevit)",
+        "File validates as valid TOML"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "pyRevit uses IronPython 2.7, so tools must be configured for Python 2 syntax"
+    },
+    {
+      "id": "US-002",
+      "title": "Add requirements-dev.txt",
+      "description": "As a developer, I need a simple way to install dev dependencies without pyproject.toml support.",
+      "acceptanceCriteria": [
+        "Create requirements-dev.txt with pytest, flake8, mypy, black, isort",
+        "Pin versions for reproducibility",
+        "File is valid requirements format"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add flake8 configuration",
+      "description": "As a developer, I want flake8 configured to ignore Python 2 specific patterns.",
+      "acceptanceCriteria": [
+        "Create .flake8 config file",
+        "Set max-line-length to 120",
+        "Exclude .git, __pycache__, build directories",
+        "Ignore E501 for long lines in specific cases"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add pytest configuration",
+      "description": "As a developer, I want pytest configured to find and run tests correctly.",
+      "acceptanceCriteria": [
+        "Add pytest configuration in pyproject.toml or pytest.ini",
+        "Configure testpaths to tests/",
+        "Set python_files pattern",
+        "Existing test_pk_indicator_rules.py passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Create GitHub Actions workflow for CI",
+      "description": "As a developer, I want automated checks on every push and PR.",
+      "acceptanceCriteria": [
+        "Create .github/workflows/ci.yml",
+        "Trigger on push to main and pull_request",
+        "Run on ubuntu-latest with Python 3.9+",
+        "Install dev dependencies",
+        "Run flake8 linting",
+        "Run pytest with coverage"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add pre-commit hooks configuration",
+      "description": "As a developer, I want local checks before committing code.",
+      "acceptanceCriteria": [
+        "Create .pre-commit-config.yaml",
+        "Add hooks: trailing-whitespace, end-of-file-fixer, check-yaml",
+        "Add flake8 hook",
+        "Add isort hook for import sorting",
+        "File is valid YAML"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Fix existing code to pass linting",
+      "description": "As a developer, I want the codebase to pass linting checks.",
+      "acceptanceCriteria": [
+        "Run flake8 on lib/ directory",
+        "Fix critical errors (undefined names, syntax errors)",
+        "Ignore style warnings for now (E501, W503)",
+        "All lib/*.py files pass flake8 with configured ignores"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Focus on errors, not style. pyRevit code has specific patterns. Cannot verify locally - no Python in PATH."
+    },
+    {
+      "id": "US-008",
+      "title": "Add Makefile with common commands",
+      "description": "As a developer, I want simple commands to run tests and linting.",
+      "acceptanceCriteria": [
+        "Create Makefile with targets: lint, test, check",
+        "lint target runs flake8",
+        "test target runs pytest",
+        "check target runs both lint and test",
+        "Works on Windows with make or can use PowerShell alternative"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

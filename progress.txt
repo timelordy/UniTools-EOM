@@ -1,0 +1,26 @@
+ # Progress Log - CI/CD Pipeline Implementation
+ 
+ ## Project Context
+ - pyRevit extension for Revit automation
+ - Uses IronPython 2.7 (Revit runtime)
+ - Tests can run with Python 3.x (pytest)
+ - One existing test file: tests/test_pk_indicator_rules.py
+ 
+ ## Iteration Log
+ (Append learnings here as stories are completed)
+ 
+ ## 2026-01-17 - US-001 through US-006, US-008
+ - Implemented full CI/CD infrastructure in one pass
+ - Files created:
+   - pyproject.toml - project config with dev dependencies and tool settings
+   - requirements-dev.txt - pip-installable dev dependencies
+   - .flake8 - flake8 configuration (ignores E501, W503, E203)
+   - .github/workflows/ci.yml - GitHub Actions CI pipeline
+   - .pre-commit-config.yaml - pre-commit hooks
+   - Makefile - Unix commands (lint, test, check)
+   - dev.ps1 - PowerShell equivalent for Windows
+ - **Learnings for future iterations:**
+   - No Python in PATH on this Windows machine - cannot verify linting locally
+   - pyRevit uses IronPython 2.7 but tests run on Python 3.x
+   - CI will run on GitHub Actions with Python 3.11
+ ---

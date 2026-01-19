@@ -107,7 +107,7 @@
     "low_voltage_search_radius_mm":  1500,
     "ac_validate_basket_max_dist_mm":  2000,
     "socket_dedupe_radius_mm":  300,
-    "switch_allow_point_fallback":  true,
+    "switch_allow_point_fallback":  false,
     "wet_fallback_step_mm":  500,
     "ac_wall_search_max_dist_mm":  2500,
     "lift_shaft_dedupe_radius_mm":  500,
@@ -328,7 +328,7 @@
     "kitchen_total_sockets":  4,
     "ac_facade_dir_hint_min_align":  0.5,
     "door_head_height_mm":  2100,
-    "host_wall_search_mm":  300,
+    "host_wall_search_mm":  1000,
     "ac_basket_bbox_z_tol_mm":  1500,
     "wet_room_name_patterns":  [
                                    "сануз",

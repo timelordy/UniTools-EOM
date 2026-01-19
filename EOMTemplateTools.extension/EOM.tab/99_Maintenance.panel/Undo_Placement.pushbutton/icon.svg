@@ -1,0 +1,5 @@
+ <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+   <rect width="64" height="64" fill="#FF9800" rx="8"/>
+   <!-- Undo arrow -->
+   <path d="M 40 20 L 24 32 L 40 44 L 40 36 C 48 36 52 40 52 48 L 52 48 C 52 34 44 28 40 28 L 40 20 Z" fill="white"/>
+ </svg>

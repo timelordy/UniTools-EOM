@@ -12,13 +12,12 @@ Example:
     >>> ft_to_mm(1.0)
     304.8
 """
-from typing import Optional, Union
 
 
-MM_PER_FOOT: float = 304.8
+MM_PER_FOOT = 304.8
 
 
-def mm_to_ft(mm: Optional[Union[float, int, str]]) -> Optional[float]:
+def mm_to_ft(mm):
     """Convert millimeters to feet.
 
     Args:
@@ -39,7 +38,7 @@ def mm_to_ft(mm: Optional[Union[float, int, str]]) -> Optional[float]:
     return float(mm) / MM_PER_FOOT
 
 
-def ft_to_mm(ft: Optional[Union[float, int, str]]) -> Optional[float]:
+def ft_to_mm(ft):
     """Convert feet to millimeters.
 
     Args:

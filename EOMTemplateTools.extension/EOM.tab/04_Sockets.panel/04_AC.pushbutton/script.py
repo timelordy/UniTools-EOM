@@ -82,7 +82,115 @@ def get_wall_width(wall):
                 return wt.Width
     except:
         pass
+    # Try to get width from BoundingBox
+    try:
+        bb = wall.get_BoundingBox(None)
+        if bb:
+            loc = wall.Location
+            if isinstance(loc, DB.LocationCurve):
+                curve = loc.Curve
+                p0, p1 = curve.GetEndPoint(0), curve.GetEndPoint(1)
+                dx, dy = p1.X - p0.X, p1.Y - p0.Y
+                length = math.sqrt(dx*dx + dy*dy)
+                if length > 1e-9:
+                    # Wall is along X or Y - get perpendicular dimension
+                    if abs(dx) > abs(dy):
+                        # Wall along X, width is in Y
+                        return bb.Max.Y - bb.Min.Y
+                    else:
+                        # Wall along Y, width is in X
+                        return bb.Max.X - bb.Min.X
+    except:
+        pass
     return mm2ft(200)
+
+
+def get_wall_surface_points(wall, target_pt, link_transform, corner_offset, z_coord):
+    """Get points on both wall surfaces closest to target point.
+    
+    Places sockets perpendicular to wall from target point.
+    Returns list of dicts with 'point' and 'normal'.
+    """
+    results = []
+    
+    try:
+        loc = wall.Location
+        if isinstance(loc, DB.LocationCurve):
+            curve = loc.Curve
+            p0 = link_transform.OfPoint(curve.GetEndPoint(0))
+            p1 = link_transform.OfPoint(curve.GetEndPoint(1))
+            
+            # Wall direction and normal
+            dx, dy = p1.X - p0.X, p1.Y - p0.Y
+            length = math.sqrt(dx*dx + dy*dy)
+            if length < 1e-9:
+                return results
+            wall_dir = DB.XYZ(dx/length, dy/length, 0)
+            wall_normal = DB.XYZ(-wall_dir.Y, wall_dir.X, 0)
+            
+            # Get wall bounds from BoundingBox for accurate center
+            bb = wall.get_BoundingBox(None)
+            if bb:
+                # Transform BB corners to host coordinates
+                bb_min = link_transform.OfPoint(bb.Min)
+                bb_max = link_transform.OfPoint(bb.Max)
+                
+                # Calculate actual wall center and half-width from BB
+                if abs(wall_dir.X) > abs(wall_dir.Y):
+                    # Wall mostly along X axis - width is in Y
+                    half_width = abs(bb_max.Y - bb_min.Y) / 2.0
+                    wall_center_offset = (bb_max.Y + bb_min.Y) / 2.0
+                else:
+                    # Wall mostly along Y axis - width is in X  
+                    half_width = abs(bb_max.X - bb_min.X) / 2.0
+                    wall_center_offset = (bb_max.X + bb_min.X) / 2.0
+            else:
+                # Fallback to Width property
+                width = get_wall_width(wall)
+                half_width = width / 2.0
+                if half_width < mm2ft(25):
+                    half_width = mm2ft(100)
+                wall_center_offset = None
+            
+            # Find perpendicular intersection point on wall centerline
+            # Vector from p0 to target
+            to_target_x = target_pt.X - p0.X
+            to_target_y = target_pt.Y - p0.Y
+            
+            # Project onto wall direction to get distance along wall
+            t = (to_target_x * wall_dir.X + to_target_y * wall_dir.Y)
+            # Clamp to wall length with corner offset
+            t = max(corner_offset, min(length - corner_offset, t))
+            
+            # Point on wall - use BB center if available
+            if bb and wall_center_offset is not None:
+                if abs(wall_dir.X) > abs(wall_dir.Y):
+                    # Wall along X - center_y from BB, center_x from projection
+                    center_x = p0.X + wall_dir.X * t
+                    center_y = wall_center_offset
+                else:
+                    # Wall along Y - center_x from BB, center_y from projection
+                    center_x = wall_center_offset
+                    center_y = p0.Y + wall_dir.Y * t
+            else:
+                center_x = p0.X + wall_dir.X * t
+                center_y = p0.Y + wall_dir.Y * t
+            
+            # Two surface points - one on each side of wall
+            for sign in [1, -1]:
+                surface_pt = DB.XYZ(
+                    center_x + wall_normal.X * half_width * sign,
+                    center_y + wall_normal.Y * half_width * sign,
+                    z_coord
+                )
+                results.append({
+                    'point': surface_pt,
+                    'normal': DB.XYZ(wall_normal.X * sign, wall_normal.Y * sign, 0)
+                })
+    except:
+        pass
+    
+    return results
 
 
 def main():
@@ -176,15 +284,17 @@ def main():
                     p0 = tf.OfPoint(c.GetEndPoint(0))
                     p1 = tf.OfPoint(c.GetEndPoint(1))
                     zmax = tf.OfPoint(DB.XYZ(0, 0, bb.Max.Z)).Z if bb else p0.Z + mm2ft(2700)
-                    wall_width = get_wall_width(w)
+                    zmin = tf.OfPoint(DB.XYZ(0, 0, bb.Min.Z)).Z if bb else p0.Z
                     
                     all_walls.append({
+                        'wall': w,
+                        'transform': tf,
                         'p0': p0,
                         'p1': p1,
                         'ext': ext,
                         'dir': wall_direction(w),
                         'zmax': zmax,
-                        'th': wall_width
+                        'zmin': zmin
                     })
                 except:
                     continue
@@ -244,6 +354,9 @@ def main():
             for wd in all_walls:
                 if not wd['ext']:
                     continue
+                # Check wall is on same floor as basket
+                if pt.Z < wd['zmin'] or pt.Z > wd['zmax']:
+                    continue
                 proj, dist = project_to_wall(pt, wd['p0'], wd['p1'])
                 if proj and dist < facade_dist:
                     facade_dist = dist
@@ -251,6 +364,9 @@ def main():
             
             if not facade_dir:
                 for wd in all_walls:
+                    # Check wall is on same floor as basket
+                    if pt.Z < wd['zmin'] or pt.Z > wd['zmax']:
+                        continue
                     proj, dist = project_to_wall(pt, wd['p0'], wd['p1'])
                     if proj and dist < facade_dist:
                         facade_dist = dist
@@ -269,6 +385,9 @@ def main():
                     continue
                 if not walls_perpendicular(wd['dir'], facade_dir):
                     continue
+                # Check wall is on same floor as basket (Z range overlap)
+                if pt.Z < wd['zmin'] or pt.Z > wd['zmax']:
+                    continue
                 proj, dist = project_to_wall(pt, wd['p0'], wd['p1'])
                 if proj and dist <= search_ft and dist < perp_dist:
                     perp_dist = dist
@@ -278,23 +397,7 @@ def main():
                 skip_no_perp += 1
                 continue
             
-            # Calculate socket position
-            d = perp_wall['dir']
-            n = DB.XYZ(-d.Y, d.X, 0)  # wall normal
-            p0, p1 = perp_wall['p0'], perp_wall['p1']
-            
-            # Wall half-thickness + offset to place ON surface
-            half_th = perp_wall['th'] / 2.0
-            if half_th < mm2ft(25):
-                half_th = mm2ft(100)
-            surface_offset = half_th + mm2ft(2)  # 2mm outside surface
-            
-            # Corner closest to basket
-            if dist_xy(p0, pt) < dist_xy(p1, pt):
-                cx, cy = p0.X + d.X * corner_ft, p0.Y + d.Y * corner_ft
-            else:
-                cx, cy = p1.X - d.X * corner_ft, p1.Y - d.Y * corner_ft
-            
+            # Calculate Z coordinate
             z = perp_wall['zmax'] - ceil_ft
             
             # Find level
@@ -305,13 +408,21 @@ def main():
                 if dz < min_dz:
                     min_dz, lvl = dz, l
             
-            # Place on BOTH sides of wall
-            for sign in [1, -1]:
-                sx = cx + n.X * surface_offset * sign
-                sy = cy + n.Y * surface_offset * sign
-                socket_pt = DB.XYZ(sx, sy, z)
+            # Get wall surface points using geometry
+            surface_points = get_wall_surface_points(
+                perp_wall['wall'],
+                pt,
+                perp_wall['transform'],
+                corner_ft,
+                z
+            )
+            
+            # Place socket on each surface
+            for surface in surface_points:
+                socket_pt = surface['point']
+                face_normal = surface['normal']
                 
-                key = (round(sx, 1), round(sy, 1))
+                key = (round(socket_pt.X, 1), round(socket_pt.Y, 1))
                 if key in existing:
                     skip_dup += 1
                     continue
@@ -319,8 +430,8 @@ def main():
                 try:
                     inst = doc.Create.NewFamilyInstance(socket_pt, sym, lvl, DB.Structure.StructuralType.NonStructural)
                     
-                    # Rotate to face away from wall
-                    angle = math.atan2(n.Y * sign, n.X * sign)
+                    # Rotate socket to face away from wall (normal points outward)
+                    angle = math.atan2(face_normal.Y, face_normal.X) - math.pi / 2  # 90 degrees clockwise
                     axis = DB.Line.CreateBound(socket_pt, DB.XYZ(socket_pt.X, socket_pt.Y, socket_pt.Z + 1))
                     DB.ElementTransformUtils.RotateElement(doc, inst.Id, axis, angle)
                     

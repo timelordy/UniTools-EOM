@@ -1,68 +1,38 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Configuration loader for EOM Template Tools.
 
-Loads rules from JSON configuration files with sensible defaults
-for all settings. Handles UTF-8 and BOM encoding issues common
-in Windows/pyRevit environments.
-
-Example:
-    >>> from config_loader import load_rules
-    >>> rules = load_rules()
-    >>> rules['comment_tag']
-    'AUTO_EOM'
+Loads rules from JSON configuration files with sensible defaults.
+Compatible with IronPython 2.7 (pyRevit).
 """
 import io
 import json
 import os
-from typing import Any, Dict, List, Optional
-
-# Type alias for rules dictionary
-RulesDict = Dict[str, Any]
 
 
-def _extension_root_from_lib() -> str:
+def _extension_root_from_lib():
     """Get extension root directory from lib location."""
     return os.path.dirname(os.path.dirname(__file__))
 
 
-def get_default_rules_path() -> str:
-    """Get the path to the default rules configuration file.
-
-    Returns:
-        Absolute path to config/rules.default.json.
-    """
+def get_default_rules_path():
+    """Get the path to the default rules configuration file."""
     return os.path.join(_extension_root_from_lib(), 'config', 'rules.default.json')
 
 
-def load_rules(path: Optional[str] = None) -> RulesDict:
+def load_rules(path=None):
     """Load rules from JSON configuration file.
-
-    Loads configuration and applies default values for any missing keys.
-    Handles various encoding issues (UTF-8, BOM) common in Windows.
-
+    
     Args:
         path: Path to JSON config file. If None, uses default rules file.
-
+    
     Returns:
         Dictionary with all configuration keys, defaults applied.
-
-    Raises:
-        Exception: If the JSON file cannot be read or parsed.
-
-    Examples:
-        >>> rules = load_rules()
-        >>> rules['comment_tag']
-        'AUTO_EOM'
-        >>> rules['light_center_room_height_mm']
-        2700
     """
     rules_path = path or get_default_rules_path()
     try:
         with io.open(rules_path, 'r', encoding='utf-8') as fp:
             data = json.load(fp)
     except Exception:
-        # Common failure in pyRevit on Windows: relative working dir / encoding issues.
-        # Try a raw open fallback and ensure BOM/encoding is handled.
         try:
             with open(rules_path, 'rb') as fb:
                 raw = fb.read()
@@ -74,94 +44,46 @@ def load_rules(path: Optional[str] = None) -> RulesDict:
         except Exception:
             raise
 
-    # Minimal normalization / defaults
-    if 'comment_tag' not in data:
-        data['comment_tag'] = 'AUTO_EOM'
-    if 'family_type_names' not in data:
-        data['family_type_names'] = {}
-    if 'light_center_room_height_mm' not in data:
-        data['light_center_room_height_mm'] = 2700
-    if 'min_light_spacing_mm' not in data:
-        data['min_light_spacing_mm'] = 800
-    if 'allow_two_lights_per_room' not in data:
-        data['allow_two_lights_per_room'] = False
-    if 'max_lights_per_room' not in data:
-        data['max_lights_per_room'] = 1
-    if 'light_room_elongation_ratio' not in data:
-        data['light_room_elongation_ratio'] = 2.2
-    if 'light_two_centers_min_long_mm' not in data:
-        data['light_two_centers_min_long_mm'] = 4500
-    if 'exclude_room_name_keywords' not in data:
-        data['exclude_room_name_keywords'] = [
-            u'ниша',
-            u'балкон',
-            u'лодж',
-            u'loggia',
-            u'balcony',
-            u'niche',
-        ]
-    if 'panel_above_door_offset_mm' not in data:
-        data['panel_above_door_offset_mm'] = 300
-    if 'dedupe_radius_mm' not in data:
-        data['dedupe_radius_mm'] = 500
-    if 'max_place_count' not in data:
-        data['max_place_count'] = 200
-    if 'batch_size' not in data:
-        data['batch_size'] = 25
-    if 'scan_limit_rooms' not in data:
-        data['scan_limit_rooms'] = 500
-    if 'scan_limit_doors' not in data:
-        data['scan_limit_doors'] = 500
-    if 'enable_existing_dedupe' not in data:
-        data['enable_existing_dedupe'] = False
-    if 'socket_spacing_mm' not in data:
-        data['socket_spacing_mm'] = 3000
-    if 'socket_height_mm' not in data:
-        data['socket_height_mm'] = 300
-    if 'avoid_door_mm' not in data:
-        data['avoid_door_mm'] = 300
-    if 'avoid_radiator_mm' not in data:
-        data['avoid_radiator_mm'] = 500
-    if 'socket_dedupe_radius_mm' not in data:
-        data['socket_dedupe_radius_mm'] = 300
-    if 'host_wall_search_mm' not in data:
-        data['host_wall_search_mm'] = 300
-
-    if 'debug_section_half_height_mm' not in data:
-        # for debug 3D view section box Z slice around placement height
-        data['debug_section_half_height_mm'] = 1500
-
-    if 'lift_shaft_room_name_patterns' not in data:
-        data['lift_shaft_room_name_patterns'] = [
-            u'лифт',
-            u'лифтов',
-            u'шахт',
-            u'elevator',
-            u'lift',
-            u'shaft',
-        ]
-    if 'lift_shaft_generic_model_keywords' not in data:
-        data['lift_shaft_generic_model_keywords'] = list(data.get('lift_shaft_room_name_patterns') or [])
-    if 'lift_shaft_family_names' not in data:
-        data['lift_shaft_family_names'] = []
-    if 'lift_shaft_room_exclude_patterns' not in data:
-        data['lift_shaft_room_exclude_patterns'] = [
-            u'машин',
-            u'machine',
-        ]
-    if 'lift_shaft_generic_model_exclude_patterns' not in data:
-        data['lift_shaft_generic_model_exclude_patterns'] = list(data.get('lift_shaft_room_exclude_patterns') or [])
-    if 'lift_shaft_light_height_mm' not in data:
-        data['lift_shaft_light_height_mm'] = 2500
-    if 'lift_shaft_edge_offset_mm' not in data:
-        data['lift_shaft_edge_offset_mm'] = 500
-    if 'lift_shaft_min_wall_clearance_mm' not in data:
-        data['lift_shaft_min_wall_clearance_mm'] = 300
-    if 'lift_shaft_min_height_mm' not in data:
-        data['lift_shaft_min_height_mm'] = 2000
-    if 'lift_shaft_wall_search_mm' not in data:
-        data['lift_shaft_wall_search_mm'] = 1000
-    if 'lift_shaft_dedupe_radius_mm' not in data:
-        data['lift_shaft_dedupe_radius_mm'] = 500
-
+    # Defaults
+    defaults = {
+        'comment_tag': 'AUTO_EOM',
+        'family_type_names': {},
+        'light_center_room_height_mm': 2700,
+        'min_light_spacing_mm': 800,
+        'allow_two_lights_per_room': False,
+        'max_lights_per_room': 1,
+        'light_room_elongation_ratio': 2.2,
+        'light_two_centers_min_long_mm': 4500,
+        'exclude_room_name_keywords': [u'ниша', u'балкон', u'лодж', u'loggia', u'balcony', u'niche'],
+        'panel_above_door_offset_mm': 300,
+        'dedupe_radius_mm': 500,
+        'max_place_count': 200,
+        'batch_size': 25,
+        'scan_limit_rooms': 500,
+        'scan_limit_doors': 500,
+        'enable_existing_dedupe': False,
+        'socket_spacing_mm': 3000,
+        'socket_height_mm': 300,
+        'avoid_door_mm': 300,
+        'avoid_radiator_mm': 500,
+        'socket_dedupe_radius_mm': 300,
+        'host_wall_search_mm': 300,
+        'debug_section_half_height_mm': 1500,
+        'lift_shaft_room_name_patterns': [u'лифт', u'лифтов', u'шахт', u'elevator', u'lift', u'shaft'],
+        'lift_shaft_generic_model_keywords': [u'лифт', u'лифтов', u'шахт', u'elevator', u'lift', u'shaft'],
+        'lift_shaft_family_names': [],
+        'lift_shaft_room_exclude_patterns': [u'машин', u'machine'],
+        'lift_shaft_generic_model_exclude_patterns': [u'машин', u'machine'],
+        'lift_shaft_light_height_mm': 2500,
+        'lift_shaft_edge_offset_mm': 500,
+        'lift_shaft_min_wall_clearance_mm': 300,
+        'lift_shaft_min_height_mm': 2000,
+        'lift_shaft_wall_search_mm': 1000,
+        'lift_shaft_dedupe_radius_mm': 500,
+    }
+    
+    for key, val in defaults.items():
+        if key not in data:
+            data[key] = val
+    
     return data

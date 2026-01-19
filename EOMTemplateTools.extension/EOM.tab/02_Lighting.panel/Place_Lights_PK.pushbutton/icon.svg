@@ -1,0 +1,7 @@
+ <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+   <rect width="64" height="64" fill="#E53935" rx="8"/>
+   <!-- Fire hydrant indicator -->
+   <rect x="16" y="20" width="32" height="24" fill="white" rx="4"/>
+   <text x="32" y="38" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#E53935" text-anchor="middle">ПК</text>
+   <circle cx="32" cy="12" r="5" fill="#FFD700"/>
+ </svg>

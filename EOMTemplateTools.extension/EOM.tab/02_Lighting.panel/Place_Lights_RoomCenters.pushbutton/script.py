@@ -526,7 +526,15 @@ def main():
     sym_col = DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_LightingFixtures).WhereElementIsElementType()
     print(u'--- AVAILABLE LIGHTING FIXTURE SYMBOLS ---')
     for s in sym_col:
-        print(u'Name: {0} | Family: {1}'.format(s.Name, s.FamilyName))
+        try:
+            sym_name = s.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM).AsString() or str(s.Id.IntegerValue)
+        except:
+            sym_name = str(s.Id.IntegerValue)
+        try:
+            fam_name = s.get_Parameter(DB.BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM).AsString() or u""
+        except:
+            fam_name = u""
+        print(u'Name: {0} | Family: {1}'.format(sym_name, fam_name))
     print(u'------------------------------------------')
 
     # Defaults

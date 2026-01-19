@@ -1,0 +1,8 @@
+ <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+   <rect width="64" height="64" fill="#9C27B0" rx="8"/>
+   <!-- List/rooms icon -->
+   <rect x="14" y="12" width="36" height="40" fill="white" rx="2"/>
+   <line x1="20" y1="22" x2="44" y2="22" stroke="#9C27B0" stroke-width="2"/>
+   <line x1="20" y1="32" x2="44" y2="32" stroke="#9C27B0" stroke-width="2"/>
+   <line x1="20" y1="42" x2="44" y2="42" stroke="#9C27B0" stroke-width="2"/>
+ </svg>

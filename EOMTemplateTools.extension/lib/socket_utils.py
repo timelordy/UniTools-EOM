@@ -7,6 +7,18 @@ import placement_engine
 from utils_revit import alert, tx, ensure_symbol_active, set_comments
 from utils_units import mm_to_ft
 
+def _is_socket_instance(inst):
+    if inst is None or not isinstance(inst, DB.FamilyInstance): return False
+    try:
+        cat = inst.Category
+        if cat:
+            cid = int(cat.Id.IntegerValue)
+            if cid not in (int(DB.BuiltInCategory.OST_ElectricalFixtures), int(DB.BuiltInCategory.OST_ElectricalEquipment)):
+                return False
+    except: return False
+    # Optional: check if it's really a socket by family name or parameters if needed
+    return True
+
 def _norm(s):
     try:
         return (s or u'').strip().lower()
@@ -218,6 +230,37 @@ def _inst_center_point(inst):
     return None
 
 def _door_center_point(door): return _inst_center_point(door)
+
+def _get_comments_text(elem):
+    """Get comments text from element (Comments parameter or Mark fallback)."""
+    if elem is None:
+        return u''
+    try:
+        p = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+        if p:
+            v = p.AsString()
+            if v:
+                return v
+    except Exception:
+        pass
+    for nm in (u'\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0438', u'Comments'):
+        try:
+            p = elem.LookupParameter(nm)
+            if p:
+                v = p.AsString()
+                if v:
+                    return v
+        except Exception:
+            continue
+    try:
+        p = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_MARK)
+        if p:
+            v = p.AsString()
+            if v:
+                return v
+    except Exception:
+        pass
+    return u''
 
 def _try_get_width_ft(elem, bips=None, names=None):
     if elem is None: return None
@@ -1248,6 +1291,28 @@ def _collect_towel_rails_points(link_doc):
 
     return pts
 
+def _collect_toilets_data(link_doc):
+    data = []
+    if not link_doc: return data
+    
+    # Keywords for toilets (WC)
+    keys = [u'унитаз', u'toilet', u'wc', u'closet', u'инсталляция', u'инсталяция']
+    bics = [DB.BuiltInCategory.OST_PlumbingFixtures, DB.BuiltInCategory.OST_GenericModel]
+    
+    for bic in bics:
+        try:
+            col = DB.FilteredElementCollector(link_doc).OfCategory(bic).WhereElementIsNotElementType()
+            for e in col:
+                t = _elem_text(e)
+                if not t: continue
+                if not any(_norm(k) in t for k in keys): continue
+                
+                pt = _inst_center_point(e)
+                if pt:
+                    data.append(pt)
+        except: pass
+    return data
+
 def _collect_bathtubs_data(link_doc):
     data = []
     if not link_doc: return data
@@ -1261,9 +1326,41 @@ def _collect_bathtubs_data(link_doc):
                 t = _elem_text(e)
                 if not t: continue
                 if not any(_norm(k) in t for k in keys): continue
-                p = _inst_center_point(e)
                 bb = e.get_BoundingBox(None)
-                if p and bb: data.append((p, bb.Min, bb.Max))
+                if bb:
+                    # Force BoundingBox center for bathtubs, as Insertion Point is often at corner
+                    p_center = (bb.Min + bb.Max) * 0.5
+                    
+                    # Try to find a connector or a special point that indicates the "head" (faucet) side.
+                    # MEP connectors are the most reliable way if families are MEP.
+                    faucet_pt = None
+                    try:
+                        mep_model = e.MEPModel
+                        if mep_model:
+                            connectors = mep_model.ConnectorManager.Connectors
+                            if connectors:
+                                for c in connectors:
+                                    # Assume water supply/waste connector is near the faucet/drain side
+                                    # Just picking the first one is often enough for "one-sided" objects like tubs
+                                    faucet_pt = c.Origin
+                                    break
+                    except: pass
+                    
+                    # If no connectors, check if location point is significantly offset from center (often insertion is at corner/drain)
+                    if not faucet_pt:
+                        try:
+                            loc = getattr(e, 'Location', None)
+                            loc_pt = loc.Point if loc and hasattr(loc, 'Point') else None
+                            if loc_pt:
+                                d_from_center = loc_pt.DistanceTo(p_center)
+                                # If insertion point is far from center, it might be the corner/drain side.
+                                # But insertion points are inconsistent. Connectors are better.
+                                # Let's store insertion point as a fallback hint.
+                                faucet_pt = loc_pt
+                        except: pass
+
+                    # Store: (CenterPoint, BBoxMin, BBoxMax, FaucetHintPoint)
+                    data.append((p_center, bb.Min, bb.Max, faucet_pt))
         except: pass
     return data
 

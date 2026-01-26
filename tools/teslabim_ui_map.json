@@ -1,0 +1,688 @@
+﻿{
+    "panels":  {
+                   "val":  "Однолинейные схемы",
+                   "val6":  "Спецификация",
+                   "val5":  "Электроосвещение",
+                   "val8":  "Teslabim ver. ",
+                   "val7":  "Утилиты",
+                   "val2":  "Кабельная трасса",
+                   "val4":  "Электрические цепи",
+                   "val3":  "Работа с моделью"
+               },
+    "panelOrder":  [
+                       "val",
+                       "val2",
+                       "val3",
+                       "val4",
+                       "val5",
+                       "val6",
+                       "val7",
+                       "val8"
+                   ],
+    "push":  {
+                 "val87":  {
+                               "cmd":  "cmdClearWrongFamilies",
+                               "label":  "Почистить\\nсемейства",
+                               "asm":  "text2",
+                               "cls":  "ClearWrongFamilies.ClearWrongFamiliesClass",
+                               "icon":  "SEP_ClearWrongFamilies_32.png"
+                           },
+                 "val10":  {
+                               "cmd":  "cmdSetVvod",
+                               "label":  "Обновить\\nинформацию о вводе",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_SetVvod.Command",
+                               "icon":  "WMBD_SetVvod_32.png"
+                           },
+                 "val20":  {
+                               "cmd":  "cmdCompensation",
+                               "label":  "Компенсация\\nреактивной мощности",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_Compensation.Command",
+                               "icon":  "WMBD_Compensation_32.png"
+                           },
+                 "val45":  {
+                               "cmd":  "cmdSplitSmartFrame",
+                               "label":  "Разделить\\nСмарт-рамку",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_SplitSmartFrame.Command",
+                               "icon":  "BTS_SplitSmartFrame_32.png"
+                           },
+                 "val53":  {
+                               "cmd":  "cmdSetElectricalCircuit",
+                               "label":  "Назначить\\nцепь",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_SetElectricalCircuit.Command",
+                               "icon":  "BTS_SetElectricalCircuit_32.png"
+                           },
+                 "val46":  {
+                               "cmd":  "cmdChangeLevel",
+                               "label":  "Изменить\\nуровень",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_ChangeLevel.Command",
+                               "icon":  "WMBD_ChangeLevel_32.png"
+                           },
+                 "val97":  {
+                               "cmd":  "cmdOpenWebsite",
+                               "label":  "Открыть сайт с информацией",
+                               "asm":  "location",
+                               "cls":  "Teslabim.ExtCommands.OpenWebsite.Command",
+                               "icon":  "TSL_WWW_32.png"
+                           },
+                 "val38":  {
+                               "cmd":  "cmdKnkCalculateLengthsByLayingMethods",
+                               "label":  "Рассчитать\\nматериалы",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_KnkCalculateLengthsByLayingMethods.Command",
+                               "icon":  "BTS_KnkCalculateLengthsByLayingMethods_32.png"
+                           },
+                 "val83":  {
+                               "cmd":  "cmdSimilarParams",
+                               "label":  "Одинаковые\\nпараметры",
+                               "asm":  "text2",
+                               "cls":  "SimilarParams.SimilarParamsClass",
+                               "icon":  "SEP_SimilarParams_32.png"
+                           },
+                 "val89":  {
+                               "cmd":  "cmdCreateCleanViewInFamily",
+                               "label":  "Создать чистый\\nвид в семействе",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_CreateCleanViewInFamily.Command",
+                               "icon":  "BTS_CreateCleanViewInFamily_32.png"
+                           },
+                 "val37":  {
+                               "cmd":  "cmdKnkCreateSection",
+                               "label":  "Создать сечение\\nкабельного лотка",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_KnkCreateSection.Command",
+                               "icon":  "BTS_KnkCreateSection_32.png"
+                           },
+                 "val56":  {
+                               "cmd":  "cmdCreateUserModeCircuit",
+                               "label":  "Создать\\nпользоват. режим",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_CreateUserModeCircuit.Command",
+                               "icon":  "BTS_CreateUserModeCircuit_32.png"
+                           },
+                 "val30":  {
+                               "cmd":  "cmdKnkCalculateCableLengths",
+                               "label":  "Рассчитать\\nдлины кабелей",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_KnkCalculateCableLengths.Command",
+                               "icon":  "WMBD_KnkCalculateCableLengths_32.png"
+                           },
+                 "val55":  {
+                               "cmd":  "cmdSelectElementsWithElectricalCircuits",
+                               "label":  "Выбрать\\nэлементы и цепи",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_SelectElementsWithElectricalCircuits.Command",
+                               "icon":  "BTS_SelectElementsWithElectricalCircuits_32.png"
+                           },
+                 "val12":  {
+                               "cmd":  "cmdPhase",
+                               "label":  "Фазировка",
+                               "asm":  "text2",
+                               "cls":  "Phase.PhaseClass",
+                               "icon":  "SEP_Phase_32.png"
+                           },
+                 "val11":  {
+                               "cmd":  "cmdAvCounts",
+                               "label":  "Расчёт\\nсхем",
+                               "asm":  "text2",
+                               "cls":  "AvCounts.AvCountsClass",
+                               "icon":  "SEP_AvCounts_32.png"
+                           },
+                 "val58":  {
+                               "cmd":  "cmdChangeVoltage",
+                               "label":  "Изменить\\nнапряжение цепи",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_ChangeVoltage.Command",
+                               "icon":  "WMBD_ChangeVoltage_32.png"
+                           },
+                 "val16":  {
+                               "cmd":  "cmdResetScheme",
+                               "label":  "Обнулить схему",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ResetScheme.Command",
+                               "icon":  "BTS_ResetScheme_32.png"
+                           },
+                 "val93":  {
+                               "cmd":  "cmdPlacementFamiliesInstProject",
+                               "label":  "Расставить\\nсемейства",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_PlacementFamiliesInstProject.Command",
+                               "icon":  "BTS_PlacementFamiliesInstProject_32.png"
+                           },
+                 "val77":  {
+                               "cmd":  "cmdShowElementsForSpec",
+                               "label":  "Выделить\\nв модели",
+                               "asm":  "text2",
+                               "cls":  "ShowElementsForSpec.ShowElementsForSpecClass",
+                               "icon":  "SEP_ShowElementsForSpec_32.png"
+                           },
+                 "val84":  {
+                               "cmd":  "cmdMEPLength",
+                               "label":  "Длины\\nMEP",
+                               "asm":  "text2",
+                               "cls":  "ALength.OverLength",
+                               "icon":  "SEP_MEPLength_32.png"
+                           },
+                 "val79":  {
+                               "cmd":  "cmdImportExcel",
+                               "label":  "Импорт\\nиз Excel",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ImportExcel.Command",
+                               "icon":  "BTS_ImportExcel_32.png"
+                           },
+                 "val15":  {
+                               "cmd":  "cmdSelectivity",
+                               "label":  "Селективность",
+                               "asm":  "text2",
+                               "cls":  "Selectivity.SelectivityClass",
+                               "icon":  "SEP_Selectivity_32.png"
+                           },
+                 "val62":  {
+                               "cmd":  "cmdImportDx",
+                               "label":  "Импорт\\nиз DIALux",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ImportDx.Command",
+                               "icon":  "BTS_ImportDx_32.png"
+                           },
+                 "val25":  {
+                               "cmd":  "cmdSelectConduit",
+                               "label":  "Подобрать\\nдиаметр трубы",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_SelectConduit.Command",
+                               "icon":  "WMBD_SelectConduit_32.png"
+                           },
+                 "val98":  {
+                               "cmd":  "cmdWriteToSupport",
+                               "label":  "Написать в поддержку",
+                               "asm":  "location",
+                               "cls":  "Teslabim.ExtCommands.WriteToSupport.Command",
+                               "icon":  "SEP_Openinfo_32.png"
+                           },
+                 "val47":  {
+                               "cmd":  "cmdReplaceDetailLines",
+                               "label":  "Заменить\\nлинии детализации",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ReplaceDetailLines.Command",
+                               "icon":  "BTS_ReplaceDetailLines_32.png"
+                           },
+                 "val48":  {
+                               "cmd":  "cmdMasterFilter",
+                               "label":  "Фильтр",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_MasterFilter.Command",
+                               "icon":  "WMBD_MasterFilter_32.png"
+                           },
+                 "val65":  {
+                               "cmd":  "cmdInsertElementBetweenTwoPoints",
+                               "label":  "Поставить по\\nдвум точкам",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_InsertElementBetweenTwoPoints.Command",
+                               "icon":  "BTS_InsertElementBetweenTwoPoints_32.png"
+                           },
+                 "val96":  {
+                               "cmd":  "cmdTeslaSettings",
+                               "label":  "Настройки",
+                               "asm":  "text2",
+                               "cls":  "TeslaSettings.TeslaSettingsClass",
+                               "icon":  "SEP_TeslaSettings_32.png"
+                           },
+                 "val36":  {
+                               "cmd":  "cmdKnkCalculateOccupancy",
+                               "label":  "Рассчитать\\nзаполняемость лотков",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_KnkCalculateOccupancy.Command",
+                               "icon":  "BTS_KnkCalculateOccupancy_32.png"
+                           },
+                 "val23":  {
+                               "cmd":  "cmdPanelInformation",
+                               "label":  "Вставить\\nинформацию о НКУ",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_PanelInformation.Command",
+                               "icon":  "BTS_PanelInformation_32.png"
+                           },
+                 "val35":  {
+                               "cmd":  "cmdKnkSetElectricalCircuit",
+                               "label":  "Записать\\nномера цепей в лоток",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_KnkSetElectricalCircuit.Command",
+                               "icon":  "BTS_KnkSetElectricalCircuit_32.png"
+                           },
+                 "val9":  {
+                              "cmd":  "cmdSyncScheme",
+                              "label":  "Синхронизировать\\nсхему с планами",
+                              "asm":  "text2",
+                              "cls":  "SyncScheme.SyncSchemeClass",
+                              "icon":  "SEP_SyncScheme_32.png"
+                          },
+                 "val90":  {
+                               "cmd":  "cmdChangeParametersInFamilies",
+                               "label":  "Пакетная замена\\nпараметров в семействах",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ChangeParametersInFamilies.Command",
+                               "icon":  "BTS_ChangeParametersInFamilies_32.png"
+                           },
+                 "val76":  {
+                               "cmd":  "cmdManufacturerSelectCable",
+                               "label":  "Подобрать\\nкабели",
+                               "asm":  "text2",
+                               "cls":  "ManufacturerSelectCable.ManufacturerSelectCableClass",
+                               "icon":  "SEP_ManufacturerSelectCable_32.png"
+                           },
+                 "val33":  {
+                               "cmd":  "cmdKnkShowPath",
+                               "label":  "Показать\\nтрассу",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_KnkShowPath.Command",
+                               "icon":  "WMBD_KnkShowPath_32.png"
+                           },
+                 "val88":  {
+                               "cmd":  "cmdUpdateFamilies",
+                               "label":  "Обновить\\nсемейства по параметрам",
+                               "asm":  "text2",
+                               "cls":  "UpdateFamilies.UpdateFamiliesClass",
+                               "icon":  "SEP_UpdateFamilies_32.png"
+                           },
+                 "val75":  {
+                               "cmd":  "cmdSelectionElectricalPanels",
+                               "label":  "Подобрать\\nщит",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_SelectionElectricalPanels.Command",
+                               "icon":  "BTS_SelectionElectricalPanels_32.png"
+                           },
+                 "val50":  {
+                               "cmd":  "cmdViewLinkElement",
+                               "label":  "Найти\\nэлемент в связи",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_ViewLinkElement.Command",
+                               "icon":  "WMBD_ViewLinkElement_32.png"
+                           },
+                 "val85":  {
+                               "cmd":  "cmdCreateReferencePlane",
+                               "label":  "Создать\\nопорную плоскость",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_CreateReferencePlane.Command",
+                               "icon":  "BTS_CreateReferencePlane_32.png"
+                           },
+                 "val78":  {
+                               "cmd":  "cmdExportExcel",
+                               "label":  "Экспорт\\nв Excel",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ExportExcel.Command",
+                               "icon":  "BTS_ExportExcel_32.png"
+                           },
+                 "val19":  {
+                               "cmd":  "cmdTT",
+                               "label":  "Проверить ТТ",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_TT.Command",
+                               "icon":  "WMBD_TT_32.png"
+                           },
+                 "val14":  {
+                               "cmd":  "cmdWriteAccessory",
+                               "label":  "Записать принадлежность",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_AccessoryWrite.Command",
+                               "icon":  "BTS_WriteAccessory_32.png"
+                           },
+                 "val63":  {
+                               "cmd":  "cmdPlaceElements",
+                               "label":  "Расставить\\nэлементы",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_PlaceElements.Command",
+                               "icon":  "BTS_PlaceElements_32.png"
+                           },
+                 "val17":  {
+                               "cmd":  "cmdBoxDraw",
+                               "label":  "Нарисовать схему щита",
+                               "asm":  "text2",
+                               "cls":  "BoxDraw.BoxDrawClass",
+                               "icon":  "SEP_BoxDraw_32.png"
+                           },
+                 "val54":  {
+                               "cmd":  "cmdSetElectricalCircuitsInLine",
+                               "label":  "Записать\\nцепи в линию",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_SetElectricalCircuitsInLine.Command",
+                               "icon":  "BTS_SetElectricalCircuitsInLine_32.png"
+                           },
+                 "val73":  {
+                               "cmd":  "cmdSpecification",
+                               "label":  "Спецификация",
+                               "asm":  "text2",
+                               "cls":  "Specification.SpecificationClass",
+                               "icon":  "SEP_Specification_32.png"
+                           },
+                 "val66":  {
+                               "cmd":  "cmdIlluminationCheck",
+                               "label":  "Проверить\\nосвещённость",
+                               "asm":  "text2",
+                               "cls":  "IlluminationCheck.IlluminationCheckClass",
+                               "icon":  "SEP_IlluminationCheck_32.png"
+                           },
+                 "val57":  {
+                               "cmd":  "cmdRemoveUserModeCircuit",
+                               "label":  "Удалить\\nпользоват. режим",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_RemoveUserModeCircuit.Command",
+                               "icon":  "BTS_RemoveUserModeCircuit_32.png"
+                           },
+                 "val68":  {
+                               "cmd":  "cmdKnkCalculateLight",
+                               "label":  "Решения\\nпо электроосвещению",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_KnkCalculateLight.Command",
+                               "icon":  "WMBD_KnkCalculateLight_32.png"
+                           },
+                 "val92":  {
+                               "cmd":  "cmdUnloadFamilies",
+                               "label":  "Выгрузить\\nсемейства",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_UnloadFamilies.Command",
+                               "icon":  "BTS_UnloadFamilies_32.png"
+                           },
+                 "val91":  {
+                               "cmd":  "cmdUploadFamilies",
+                               "label":  "Загрузить\\nсемейства",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_UploadFamilies.Command",
+                               "icon":  "BTS_UploadFamilies_32.png"
+                           },
+                 "val42":  {
+                               "cmd":  "cmdParameterization",
+                               "label":  "Параметризация",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_Parameterization.Command",
+                               "icon":  "BTS_Parameterization_32.png"
+                           },
+                 "val32":  {
+                               "cmd":  "cmdKnkDeletePaths",
+                               "label":  "Удалить\\nпути до трассы",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_KnkDeletePaths.Command",
+                               "icon":  "WMBD_KnkDeletePaths_32.png"
+                           },
+                 "val21":  {
+                               "cmd":  "cmdCollectLoads",
+                               "label":  "Собрать\\nнагрузки",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_LoadCollection.Command",
+                               "icon":  "BTS_CollectLoads_32.png"
+                           },
+                 "val74":  {
+                               "cmd":  "cmdManufacturerSelect",
+                               "label":  "Выбрать\\nпроизводителя",
+                               "asm":  "text2",
+                               "cls":  "ManufacturerSelect.ManufacturerSelectClass",
+                               "icon":  "SEP_ManufacturerSelect_32.png"
+                           },
+                 "val31":  {
+                               "cmd":  "cmdKnkCreatePaths",
+                               "label":  "Создать\\nпути до трассы",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_KnkCreatePaths.Command",
+                               "icon":  "WMBD_KnkCreatePaths_32.png"
+                           },
+                 "val18":  {
+                               "cmd":  "cmdShortCircuit",
+                               "label":  "Токи КЗ",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_TKZ.Command",
+                               "icon":  "SEP_ShortCircuit_32.png"
+                           },
+                 "val101":  {
+                                "cmd":  "CreateSwitch",
+                                "label":  "Система\\nкоммутаций",
+                                "asm":  "text4",
+                                "cls":  "WMBD.ExtCommands.WMBD_KnkCalculateLight.CreateSwitch",
+                                "icon":  "WMBD_CreateSwitch_32.png"
+                            },
+                 "val44":  {
+                               "cmd":  "cmdGetTask",
+                               "label":  "Получить\\nзадание",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_GetTask.Command",
+                               "icon":  "BTS_GetTask_32.png"
+                           },
+                 "val61":  {
+                               "cmd":  "cmdExportDx",
+                               "label":  "Экспорт\\nв DIALux",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ExportDx.Command",
+                               "icon":  "BTS_ExportDx_32.png"
+                           },
+                 "val24":  {
+                               "cmd":  "cmdBTS_DeletingEmptyLinesInTheShieldDiagram",
+                               "label":  "Удалить пустые строки\\nв схеме щита",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_DeletingEmptyLinesInTheShieldDiagram.Command",
+                               "icon":  "BTS_DeletingEmptyLinesInTheShieldDiagram_32.png"
+                           },
+                 "val49":  {
+                               "cmd":  "cmdShowLinkElementId",
+                               "label":  "Показать\\nID элемента в связи",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_ShowLinkElementId.Command",
+                               "icon":  "WMBD_ShowLinkElementId_32.png"
+                           },
+                 "val39":  {
+                               "cmd":  "cmdKnkSplit",
+                               "label":  "Разделить номера цепей\\nв КНК по разделам",
+                               "asm":  "text4",
+                               "cls":  "WMBD.ExtCommands.WMBD_KnkSplit.Command",
+                               "icon":  "WMBD_KnkSplit_32.png"
+                           },
+                 "val82":  {
+                               "cmd":  "cmdParamtextreplace",
+                               "label":  "Заменить\\nтекст в параметрах",
+                               "asm":  "text2",
+                               "cls":  "Paramtextreplace.ParamtextreplaceClass",
+                               "icon":  "SEP_Paramtextreplace_32.png"
+                           },
+                 "val34":  {
+                               "cmd":  "cmdKnkClearPaths",
+                               "label":  "Очистить\\nтрассы",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_KnkClearPaths.Command",
+                               "icon":  "BTS_KnkClearPaths_32.png"
+                           },
+                 "val67":  {
+                               "cmd":  "cmdReverseLightingFixtures",
+                               "label":  "Перевернуть\\nсветильники",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_ReverseLightingFixtures.Command",
+                               "icon":  "BTS_ReverseLightingFixtures_32.png"
+                           },
+                 "val22":  {
+                               "cmd":  "cmdGoToThePanel",
+                               "label":  "Перейти\\nк щиту",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_GoToThePanel.Command",
+                               "icon":  "BTS_GoToThePanel_32.png"
+                           },
+                 "val13":  {
+                               "cmd":  "cmdRenameElectricalCircuits",
+                               "label":  "Переименовать группы",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_RewriteLoad.Command",
+                               "icon":  "BTS_RenameElectricalCircuits_32.png"
+                           },
+                 "val64":  {
+                               "cmd":  "cmdSpreadEvenly",
+                               "label":  "Расставить\\nсветильники",
+                               "asm":  "text2",
+                               "cls":  "SpreadEvenly.SpreadEvenlyClass",
+                               "icon":  "SEP_SpreadEvenly_32.png"
+                           },
+                 "val86":  {
+                               "cmd":  "cmdMirrored",
+                               "label":  "Отзеркаленные\\nэлементы",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_Mirrored.Command",
+                               "icon":  "BTS_Mirrored_32.png"
+                           },
+                 "val43":  {
+                               "cmd":  "cmdCreateOkk",
+                               "label":  "Огнезащитный\\nкороб",
+                               "asm":  "text3",
+                               "cls":  "BIMTools.ExtCommands.BTS_Okk.Command",
+                               "icon":  "BTS_CreateOkk_32.png"
+                           }
+             },
+    "pulldown":  {
+                     "val94":  {
+                                   "id":  "splitButton2",
+                                   "label":  "Утилиты"
+                               },
+                     "val59":  {
+                                   "id":  "SplitButtonData_p4_1",
+                                   "label":  "Электрические цепи"
+                               },
+                     "val71":  {
+                                   "id":  "splitButtonData_p5_2",
+                                   "label":  "Работа с освещением"
+                               },
+                     "val28":  {
+                                   "id":  "SplitButtonData_p1_1",
+                                   "label":  "Другие расчёты"
+                               },
+                     "val40":  {
+                                   "id":  "SplitButtonData_p2_1",
+                                   "label":  "Кабельная трасса"
+                               },
+                     "val26":  {
+                                   "id":  "SplitButtonData_p1_0",
+                                   "label":  "Синхронизации"
+                               },
+                     "val69":  {
+                                   "id":  "splitButtonData_p5_1",
+                                   "label":  "Работа с DiaLux"
+                               },
+                     "val51":  {
+                                   "id":  "splitButtonData_p3_1",
+                                   "label":  "Работа с моделью"
+                               },
+                     "val80":  {
+                                   "id":  "splitButtonData_p6_1",
+                                   "label":  "Спецификация"
+                               }
+                 },
+    "panelItems":  {
+                       "val":  [
+                                   "val26",
+                                   "val11",
+                                   "val28"
+                               ],
+                       "val102":  [
+                                      "val101"
+                                  ],
+                       "val6":  [
+                                    "val73",
+                                    "val80"
+                                ],
+                       "val5":  [
+                                    "val69",
+                                    "val71"
+                                ],
+                       "val8":  [
+                                    "val96",
+                                    "val99"
+                                ],
+                       "val7":  [
+                                    "val94"
+                                ],
+                       "val2":  [
+                                    "val40"
+                                ],
+                       "val4":  [
+                                    "val59"
+                                ],
+                       "val3":  [
+                                    "val51"
+                                ]
+                   },
+    "pulldownItems":  {
+                          "val94":  [
+                                        "val82",
+                                        "val83",
+                                        "val84",
+                                        "val85",
+                                        "val86",
+                                        "val87",
+                                        "val88",
+                                        "val89",
+                                        "val90",
+                                        "val91",
+                                        "val92",
+                                        "val93"
+                                    ],
+                          "val59":  [
+                                        "val53",
+                                        "val54",
+                                        "val55",
+                                        "val56",
+                                        "val57",
+                                        "val58"
+                                    ],
+                          "val71":  [
+                                        "val63",
+                                        "val64",
+                                        "val65",
+                                        "val66",
+                                        "val67",
+                                        "val68"
+                                    ],
+                          "val28":  [
+                                        "val18",
+                                        "val19",
+                                        "val20",
+                                        "val21",
+                                        "val22",
+                                        "val23",
+                                        "val24",
+                                        "val25"
+                                    ],
+                          "val40":  [
+                                        "val30",
+                                        "val31",
+                                        "val32",
+                                        "val33",
+                                        "val34",
+                                        "val35",
+                                        "val36",
+                                        "val37",
+                                        "val38",
+                                        "val39"
+                                    ],
+                          "val26":  [
+                                        "val9",
+                                        "val10"
+                                    ],
+                          "val69":  [
+                                        "val61",
+                                        "val62"
+                                    ],
+                          "val51":  [
+                                        "val42",
+                                        "val43",
+                                        "val44",
+                                        "val45",
+                                        "val46",
+                                        "val47",
+                                        "val48",
+                                        "val49",
+                                        "val50"
+                                    ],
+                          "val80":  [
+                                        "val74",
+                                        "val75",
+                                        "val76",
+                                        "val77",
+                                        "val78",
+                                        "val79"
+                                    ]
+                      }
+}

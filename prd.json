@@ -1,12 +1,58 @@
 {
-  "project": "EOMTemplateTools",
-  "branchName": "ralph/undo-rollback",
-  "description": "Add Undo/Rollback feature to delete elements by AUTO_EOM tag",
+  "project": "Low Voltage Sockets",
+  "branchName": "ralph/low-voltage-sockets",
+  "description": "Add logic for Intercom (1400mm near intercom) and Router (near LV panel) sockets.",
   "userStories": [
-    {"id": "US-001", "title": "Create rollback utility module", "passes": true, "priority": 1},
-    {"id": "US-002", "title": "Create Undo Last Placement button", "passes": true, "priority": 2},
-    {"id": "US-003", "title": "Create Delete All AUTO_EOM button", "passes": true, "priority": 3},
-    {"id": "US-004", "title": "Add rollback info to placement scripts", "passes": true, "priority": 4, "notes": "generate_tag() function created with timestamp support"},
-    {"id": "US-005", "title": "Add tests for rollback_utils", "passes": true, "priority": 5}
+    {
+      "id": "US-001",
+      "title": "Analyze Existing Low Voltage Script",
+      "description": "Read and understand the current implementation of 06_Low_Voltage.pushbutton.",
+      "acceptanceCriteria": [
+        "Code analysis completed"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Code analysis completed. The current script searches for Intercom and Cabinet points using keywords in TextNotes/Tags/Elements. It then places sockets. We need to refine this to support the specific requirements (1400mm near intercom, near LV panel/box in Hallway)."
+    },
+    {
+      "id": "US-002",
+      "title": "Update Constants and Keywords",
+      "description": "Add more specific keywords for Intercom and Router/LV Panel search. Ensure heights are correct.",
+      "acceptanceCriteria": [
+        "Update INTERCOM_KEYWORDS",
+        "Update CABINET_KEYWORDS",
+        "Ensure DEFAULT_INTERCOM_HEIGHT_MM is 1400",
+        "Add ROUTER_OFFSET_MM (e.g. 200mm)"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Updated constants.py with new heights and keywords."
+    },
+    {
+      "id": "US-003",
+      "title": "Refine Intercom Placement Logic",
+      "description": "Ensure intercom socket is placed 1400mm high and offset from the intercom device itself.",
+      "acceptanceCriteria": [
+        "Use 1400mm height for intercom socket",
+        "Implement offset logic (e.g. 200mm to side)",
+        "Search for 'Domofon' family instances specifically if possible, or fallback to text"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Implemented offset and height logic in orchestrator.py. Also added fallback to door handle in Hallways."
+    },
+    {
+      "id": "US-004",
+      "title": "Refine Router/LV Panel Placement Logic",
+      "description": "Place router socket near LV panel (SS) or Junction Box in Hallway.",
+      "acceptanceCriteria": [
+        "Filter rooms by 'Prihozhaya' / 'Hallway' name for Router placement",
+        "Find LV Panel (Щит СС) or Junction Box (Коробка СС)",
+        "Place socket nearby (e.g. 200mm offset, 300mm height or match panel height)"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Implemented room filtering (Hallway) and proximity placement in orchestrator.py."
+    }
   ]
 }

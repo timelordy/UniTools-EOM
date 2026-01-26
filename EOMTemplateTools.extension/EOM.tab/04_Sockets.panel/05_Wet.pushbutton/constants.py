@@ -1,0 +1,34 @@
+# -*- coding: utf-8 -*-
+
+COMMENT_TAG_DEFAULT = 'wet'
+COMMENT_SUFFIX = ' (wet)'
+
+DEFAULT_WET_PATTERNS = [u'c/у', u'ванн', u'туалет', u'уборная', u'санузел', u'постирочная', u'моп']
+
+TOTAL_TARGET = 1
+
+DEFAULT_HEIGHT_MM = 1000
+
+SOCKET_DEDUPE_RADIUS_MM = 300
+BATCH_SIZE = 50
+
+VALIDATE_MATCH_TOL_MM = 150
+VALIDATE_HEIGHT_TOL_MM = 50
+VALIDATE_WALL_DIST_MM = 150
+
+DEBUG_NO_CANDIDATES_LIMIT = 5
+DEBUG_SKIPPED_ROOMS_LIMIT = 5
+
+EXISTING_DEDUPE_MM = 300
+
+INK_RGB_SUM_THRESHOLD = 740
+SCREEN_PIXEL_SIZE = 1600
+SCREEN_GRID_STEP_PX = 4
+SCREEN_PAD_MM = 600
+
+FIXTURE_CATEGORIES = [
+    'OST_PlumbingFixtures',
+    'OST_MechanicalEquipment',
+    'OST_GenericModel',
+    'OST_Furniture',
+]

@@ -118,7 +118,11 @@ def set_comments(elem, value):
         pass
 
     # Fallback by name
-    return set_string_param(elem, 'Comments', value)
+    if set_string_param(elem, 'Comments', value):
+        return True
+    if set_string_param(elem, u'\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0438', value):
+        return True
+    return set_mark(elem, value)
 
 
 def set_mark(elem, value):

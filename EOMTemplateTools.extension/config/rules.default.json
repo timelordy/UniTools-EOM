@@ -153,6 +153,10 @@
                                                           "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п",
                                                           "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE"
                                                       ],
+                              "socket_kitchen_fridge":  [
+                                                            "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
+                                                            "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
+                                                        ],
                               "light_lift_shaft":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
                               "pk_indicator":  "TSL_SHM_УГО_ПК",
                               "socket_low_voltage":  [

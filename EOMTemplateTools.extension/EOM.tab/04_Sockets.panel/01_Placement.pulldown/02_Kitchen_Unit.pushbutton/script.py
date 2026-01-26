@@ -1,16 +1,22 @@
-# -*- coding: utf-8 -*-
-from eom_hub_runner import hub_run
-import math
+﻿# -*- coding: utf-8 -*-
+# from eom_hub_runner import hub_run
+# Unified Kitchen Socket Placement Script
+# Places: 1 double socket (1100mm) + 1 fridge socket (300mm) + 2 perimeter sockets (300mm)
 
 from pyrevit import DB, forms, revit, script
+import os
+import sys
 
 import config_loader
 import link_reader
 import placement_engine
-import kitchen_unit_planner as kup
 from utils_revit import alert, log_exception, tx
 from utils_units import mm_to_ft
 import socket_utils as su
+import imp
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_domain_path = os.path.join(_this_dir, 'domain.py')
+domain = imp.load_source('kitchen_unit_domain', _domain_path)
 
 
 doc = revit.doc
@@ -19,564 +25,10 @@ logger = script.get_logger()
 
 
 TOOL_ID = 'eom_sockets_kitchen_unit'
-TOOL_VERSION = '0.1'
-
-
-def _collect_fridge_by_visibility_param(link_doc):
-    pts = []
-    fridge_keywords = [u'холодильник', u'холод', u'fridge', u'refriger']
-    bics = [
-        DB.BuiltInCategory.OST_GenericModel,
-        DB.BuiltInCategory.OST_SpecialityEquipment,
-        DB.BuiltInCategory.OST_Furniture,
-        DB.BuiltInCategory.OST_Casework,
-        DB.BuiltInCategory.OST_DetailComponents,
-    ]
-    for bic in bics:
-        try:
-            col = DB.FilteredElementCollector(link_doc).OfCategory(bic).WhereElementIsNotElementType()
-        except Exception:
-            continue
-        for e in col:
-            try:
-                params = e.Parameters
-                for p in params:
-                    if p is None:
-                        continue
-                    pname = ''
-                    try:
-                        pname = (p.Definition.Name or '').lower()
-                    except Exception:
-                        continue
-                    is_fridge_param = False
-                    for kw in fridge_keywords:
-                        if kw in pname:
-                            is_fridge_param = True
-                            break
-                    if not is_fridge_param:
-                        continue
-                    if p.StorageType == DB.StorageType.Integer:
-                        if p.AsInteger() == 1:
-                            loc = e.Location
-                            if isinstance(loc, DB.LocationPoint):
-                                pts.append(loc.Point)
-                            break
-            except Exception:
-                pass
-    return pts
-
-
-def _norm(s):
-    try:
-        return (s or u'').strip().lower()
-    except Exception:
-        return u''
-
-
-def _dist_xy(a, b):
-    try:
-        return ((float(a.X) - float(b.X)) ** 2 + (float(a.Y) - float(b.Y)) ** 2) ** 0.5
-    except Exception:
-        return 1e9
-
-
-def _closest_point_on_segment_xy(p, a, b):
-    if p is None or a is None or b is None:
-        return None
-    try:
-        ax, ay = float(a.X), float(a.Y)
-        bx, by = float(b.X), float(b.Y)
-        px, py = float(p.X), float(p.Y)
-        vx, vy = (bx - ax), (by - ay)
-        denom = (vx * vx + vy * vy)
-        if denom <= 1e-12:
-            return DB.XYZ(ax, ay, float(p.Z) if hasattr(p, 'Z') else 0.0)
-        t = ((px - ax) * vx + (py - ay) * vy) / denom
-        if t < 0.0:
-            t = 0.0
-        elif t > 1.0:
-            t = 1.0
-        return DB.XYZ(ax + vx * t, ay + vy * t, float(p.Z) if hasattr(p, 'Z') else 0.0)
-    except Exception:
-        return None
-
-
-def _bbox_contains_point_xy(pt, bmin, bmax, tol=0.0):
-    if pt is None or bmin is None or bmax is None:
-        return False
-    try:
-        x, y = float(pt.X), float(pt.Y)
-        minx, miny = float(min(bmin.X, bmax.X)), float(min(bmin.Y, bmax.Y))
-        maxx, maxy = float(max(bmin.X, bmax.X)), float(max(bmin.Y, bmax.Y))
-        return (minx - tol) <= x <= (maxx + tol) and (miny - tol) <= y <= (maxy + tol)
-    except Exception:
-        return False
-
-
-def _is_point_in_room(room, point):
-    if room is None or point is None:
-        return False
-    try:
-        return bool(room.IsPointInRoom(point))
-    except Exception:
-        return False
-
-
-def _points_in_room(points, room, padding_ft=2.0):
-    if not points or room is None:
-        return []
-
-    room_bb = None
-    try:
-        room_bb = room.get_BoundingBox(None)
-    except Exception:
-        room_bb = None
-
-    zmid = None
-    zmin = None
-    zmax = None
-    ztol = mm_to_ft(200)
-    if room_bb:
-        try:
-            zmid = float(room_bb.Min.Z + room_bb.Max.Z) * 0.5
-            zmin = float(min(room_bb.Min.Z, room_bb.Max.Z)) - float(ztol)
-            zmax = float(max(room_bb.Min.Z, room_bb.Max.Z)) + float(ztol)
-        except Exception:
-            zmid = None
-            zmin = None
-            zmax = None
-
-    selected = []
-    for pt in points:
-        if pt is None:
-            continue
-
-        if (zmin is not None) and (zmax is not None):
-            try:
-                z = float(pt.Z)
-                if z < float(zmin) or z > float(zmax):
-                    continue
-            except Exception:
-                pass
-
-        if room_bb:
-            try:
-                min_exp = DB.XYZ(room_bb.Min.X - padding_ft, room_bb.Min.Y - padding_ft, room_bb.Min.Z)
-                max_exp = DB.XYZ(room_bb.Max.X + padding_ft, room_bb.Max.Y + padding_ft, room_bb.Max.Z)
-                if not _bbox_contains_point_xy(pt, min_exp, max_exp):
-                    continue
-            except Exception:
-                pass
-
-        if _is_point_in_room(room, pt):
-            selected.append(pt)
-            continue
-
-        pt_room = None
-        if zmid is not None:
-            try:
-                pt_room = DB.XYZ(float(pt.X), float(pt.Y), float(zmid))
-            except Exception:
-                pt_room = None
-
-        if pt_room and _is_point_in_room(room, pt_room):
-            selected.append(pt)
-            continue
-
-        # Boundary-adjacent tolerance: probe inward towards room bbox center
-        try:
-            if room_bb:
-                rc = DB.XYZ(
-                    (room_bb.Min.X + room_bb.Max.X) * 0.5,
-                    (room_bb.Min.Y + room_bb.Max.Y) * 0.5,
-                    float(pt_room.Z) if pt_room else float(pt.Z)
-                )
-                v = rc - (pt_room if pt_room else pt)
-                if v and v.GetLength() > mm_to_ft(1):
-                    vn = v.Normalize()
-                    for dmm in (200, 500, 900):
-                        probe = (pt_room if pt_room else pt) + vn * mm_to_ft(dmm)
-                        if _is_point_in_room(room, probe):
-                            selected.append(pt)
-                            break
-        except Exception:
-            pass
-
-    return selected
-
-
-def _try_get_room_at_point(doc_, pt):
-    if doc_ is None or pt is None:
-        return None
-    # Try as-is first
-    try:
-        r = doc_.GetRoomAtPoint(pt)
-        if r is not None:
-            return r
-    except Exception:
-        pass
-    # Fallbacks: same XY, typical Z probes
-    for z in (0.0, mm_to_ft(1500), mm_to_ft(3000)):
-        try:
-            r = doc_.GetRoomAtPoint(DB.XYZ(float(pt.X), float(pt.Y), float(z)))
-            if r is not None:
-                return r
-        except Exception:
-            continue
-    return None
-
-
-def _nearest_segment(pt, segs):
-    best = None
-    best_proj = None
-    best_d = None
-    for p0, p1, wall in segs or []:
-        proj = _closest_point_on_segment_xy(pt, p0, p1)
-        if proj is None:
-            continue
-        d = _dist_xy(pt, proj)
-        if best_d is None or d < best_d:
-            best = (p0, p1, wall)
-            best_proj = proj
-            best_d = d
-    return best, best_proj, best_d
-
-
-def _get_wall_segments(room, link_doc):
-    segs = []
-    if room is None or link_doc is None:
-        return segs
-    try:
-        opts = DB.SpatialElementBoundaryOptions()
-        seglist = su._get_room_outer_boundary_segments(room, opts)
-    except Exception:
-        seglist = None
-    if not seglist:
-        return segs
-
-    for bs in seglist:
-        try:
-            curve = bs.GetCurve()
-        except Exception:
-            curve = None
-        if curve is None:
-            continue
-
-        try:
-            eid = bs.ElementId
-        except Exception:
-            eid = DB.ElementId.InvalidElementId
-        if not eid or eid == DB.ElementId.InvalidElementId:
-            continue
-
-        try:
-            el = link_doc.GetElement(eid)
-        except Exception:
-            el = None
-        if el is None or (not isinstance(el, DB.Wall)):
-            continue
-        if su._is_curtain_wall(el):
-            continue
-
-        try:
-            p0 = curve.GetEndPoint(0)
-            p1 = curve.GetEndPoint(1)
-        except Exception:
-            continue
-        segs.append((p0, p1, el))
-
-    return segs
-
-
-def _get_comments_text(elem):
-    if elem is None:
-        return u''
-    try:
-        p = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-        if p:
-            v = p.AsString()
-            if v:
-                return v
-    except Exception:
-        pass
-    for nm in (u'Комментарии', u'Comments'):
-        try:
-            p = elem.LookupParameter(nm)
-            if p:
-                v = p.AsString()
-                if v:
-                    return v
-        except Exception:
-            continue
-    return u''
-
-
-def _collect_tagged_instances(host_doc, tag_value):
-    ids = set()
-    elems = []
-    pts = []
-    if host_doc is None or not tag_value:
-        return ids, elems, pts
-
-    for bic in (
-        DB.BuiltInCategory.OST_ElectricalFixtures,
-        DB.BuiltInCategory.OST_ElectricalEquipment,
-        DB.BuiltInCategory.OST_GenericModel,
-        DB.BuiltInCategory.OST_SpecialityEquipment,
-        DB.BuiltInCategory.OST_MechanicalEquipment,
-        DB.BuiltInCategory.OST_Furniture,
-    ):
-        try:
-            col = (
-                DB.FilteredElementCollector(host_doc)
-                .OfCategory(bic)
-                .OfClass(DB.FamilyInstance)
-                .WhereElementIsNotElementType()
-            )
-        except Exception:
-            col = None
-        if not col:
-            continue
-        for e in col:
-            try:
-                c = _get_comments_text(e)
-            except Exception:
-                c = u''
-            if not c:
-                continue
-            try:
-                if tag_value not in c:
-                    continue
-            except Exception:
-                continue
-
-            try:
-                ids.add(int(e.Id.IntegerValue))
-            except Exception:
-                pass
-            elems.append(e)
-            try:
-                pt = su._inst_center_point(e)
-            except Exception:
-                pt = None
-            if pt:
-                pts.append(pt)
-
-    return ids, elems, pts
-
-
-def _get_abs_z_from_level_offset(inst, host_doc):
-    if inst is None or host_doc is None:
-        return None
-    try:
-        lid = getattr(inst, 'LevelId', None)
-        if not lid or lid == DB.ElementId.InvalidElementId:
-            return None
-        lvl = host_doc.GetElement(lid)
-        if lvl is None or not hasattr(lvl, 'Elevation'):
-            return None
-        lvl_z = float(lvl.Elevation)
-    except Exception:
-        return None
-
-    off = None
-    try:
-        p = inst.get_Parameter(DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM)
-        if p and p.StorageType == DB.StorageType.Double:
-            off = p.AsDouble()
-    except Exception:
-        off = None
-
-    if off is None:
-        for nm in (
-            u'Отметка от уровня',
-            u'Смещение от уровня',
-            u'Elevation from Level',
-            u'Offset from Level',
-        ):
-            try:
-                p = inst.LookupParameter(nm)
-                if p and p.StorageType == DB.StorageType.Double:
-                    off = p.AsDouble()
-                    break
-            except Exception:
-                continue
-
-    if off is None:
-        return None
-    try:
-        return float(lvl_z) + float(off)
-    except Exception:
-        return None
-
-
-def _try_set_offset_from_level(inst, off_ft):
-    if inst is None or off_ft is None:
-        return False
-    try:
-        off = float(off_ft)
-    except Exception:
-        return False
-
-    try:
-        p = inst.get_Parameter(DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM)
-        if p and (not p.IsReadOnly) and p.StorageType == DB.StorageType.Double:
-            p.Set(off)
-            return True
-    except Exception:
-        pass
-
-    for nm in (
-        u'Отметка от уровня',
-        u'Смещение от уровня',
-        u'Elevation from Level',
-        u'Offset from Level',
-    ):
-        try:
-            p = inst.LookupParameter(nm)
-            if p and (not p.IsReadOnly) and p.StorageType == DB.StorageType.Double:
-                p.Set(off)
-                return True
-        except Exception:
-            continue
-
-    return False
-
-
-def _is_socket_instance(inst):
-    if inst is None:
-        return False
-    try:
-        sym = inst.Symbol
-    except Exception:
-        sym = None
-    try:
-        lbl = placement_engine.format_family_type(sym) if sym else ''
-    except Exception:
-        lbl = ''
-    t = _norm(lbl)
-    if not t:
-        return False
-    return (
-        (u'рзт' in t)
-        or (u'р3т' in t)
-        or (u'p3t' in t)
-        or (u'розет' in t)
-        or (u'socket' in t)
-        or (u'outlet' in t)
-    )
-
-
-def _collect_host_socket_instances(host_doc):
-    items = []
-    if host_doc is None:
-        return items
-    for bic in (DB.BuiltInCategory.OST_ElectricalFixtures, DB.BuiltInCategory.OST_ElectricalEquipment):
-        try:
-            col = (
-                DB.FilteredElementCollector(host_doc)
-                .OfCategory(bic)
-                .OfClass(DB.FamilyInstance)
-                .WhereElementIsNotElementType()
-            )
-        except Exception:
-            col = None
-        if not col:
-            continue
-        for e in col:
-            if not _is_socket_instance(e):
-                continue
-            pt = su._inst_center_point(e)
-            if pt:
-                items.append((e, pt))
-    return items
-
-
-def _collect_family_instance_points_by_symbol_id(link_doc, symbol_id_int):
-    pts = []
-    if link_doc is None or symbol_id_int is None:
-        return pts
-    try:
-        want = int(symbol_id_int)
-    except Exception:
-        return pts
-    try:
-        col = (
-            DB.FilteredElementCollector(link_doc)
-            .OfClass(DB.FamilyInstance)
-            .WhereElementIsNotElementType()
-        )
-    except Exception:
-        col = None
-    if not col:
-        return pts
-    for inst in col:
-        try:
-            sid = int(inst.Symbol.Id.IntegerValue)
-        except Exception:
-            continue
-        if sid != want:
-            continue
-        try:
-            pt = su._inst_center_point(inst)
-        except Exception:
-            pt = None
-        if pt:
-            pts.append(pt)
-    return pts
-
-
-def _pick_linked_element_any(link_inst, prompt):
-    if link_inst is None:
-        return None
-
-    uidoc = revit.uidoc
-    if uidoc is None:
-        return None
-
-    from Autodesk.Revit.UI.Selection import ISelectionFilter, ObjectType
-
-    class _AnyLinkedFilter(ISelectionFilter):
-        def AllowElement(self, elem):
-            try:
-                return elem and elem.Id == link_inst.Id
-            except Exception:
-                return False
-
-        def AllowReference(self, reference, position):
-            try:
-                if reference is None:
-                    return False
-                if reference.ElementId != link_inst.Id:
-                    return False
-                if reference.LinkedElementId is None or reference.LinkedElementId == DB.ElementId.InvalidElementId:
-                    return False
-                return True
-            except Exception:
-                return False
-
-    try:
-        r = uidoc.Selection.PickObject(ObjectType.LinkedElement, _AnyLinkedFilter(), prompt)
-    except Exception:
-        return None
-
-    try:
-        if r is None or r.ElementId != link_inst.Id:
-            return None
-    except Exception:
-        return None
-
-    ldoc = link_inst.GetLinkDocument()
-    if ldoc is None:
-        return None
-    try:
-        return ldoc.GetElement(r.LinkedElementId)
-    except Exception:
-        return None
-
+TOOL_ID = 'eom_sockets_kitchen_unified'
 
 def main():
-    output.print_md('# 02. Кухня: Гарнитур (1100мм)')
+    output.print_md(u'# 02. \u041a\u0443\u0445\u043d\u044f: \u0413\u0430\u0440\u043d\u0438\u0442\u0443\u0440 (1100\u043c\u043c)')
 
     rules = config_loader.load_rules()
     cfg = script.get_config()
@@ -584,16 +36,20 @@ def main():
     comment_tag = rules.get('comment_tag', 'AUTO_EOM')
     comment_value_unit = '{0}:SOCKET_KITCHEN_UNIT'.format(comment_tag)
     comment_value_fridge = '{0}:SOCKET_FRIDGE'.format(comment_tag)
+    comment_value_general = '{0}:SOCKET_KITCHEN_GENERAL'.format(comment_tag)
 
-    kitchen_patterns = rules.get('kitchen_room_name_patterns', None) or [u'кухн', u'kitchen', u'столов']
+    kitchen_patterns = rules.get('kitchen_room_name_patterns', None) or [u'\u043a\u0443\u0445\u043d', u'kitchen', u'\u0441\u0442\u043e\u043b\u043e\u0432']
     kitchen_rx = su._compile_patterns(kitchen_patterns)
 
-    total_target = int(rules.get('kitchen_total_sockets', 4) or 4)
+    total_target = 10  # Increased limit to allow unit + fridge + 2 general
 
     height_mm = int(rules.get('kitchen_unit_height_mm', 1100) or 1100)
     height_ft = mm_to_ft(height_mm)
     fridge_height_mm = int(rules.get('kitchen_fridge_height_mm', rules.get('kitchen_general_height_mm', 300) or 300) or 300)
     fridge_height_ft = mm_to_ft(fridge_height_mm)
+    general_height_mm = int(rules.get('kitchen_general_height_mm', 300) or 300)
+    general_height_ft = mm_to_ft(general_height_mm)
+    
     fridge_max_dist_ft = mm_to_ft(int(rules.get('kitchen_fridge_max_dist_mm', 1500) or 1500))
 
     clear_sink_mm = int(rules.get('kitchen_sink_clear_mm', 600) or 600)
@@ -605,8 +61,18 @@ def main():
     offset_stove_mm = int(rules.get('kitchen_stove_offset_mm', 600) or 600)
     offset_sink_ft = mm_to_ft(offset_sink_mm)
     offset_stove_ft = mm_to_ft(offset_stove_mm)
+    
+    unit_margin_ft = mm_to_ft(float(rules.get('kitchen_unit_margin_mm', 100) or 100))
+    general_spacing_ft = mm_to_ft(float(rules.get('kitchen_general_spacing_mm', 3000) or 3000))
+    # Total kitchen sockets = unit(1) + fridge(1) + general, so general = total - 2
+    # This is a minimum count; perimeter length may increase it.
+    kitchen_total_sockets = int(rules.get('kitchen_total_sockets', 4) or 4)
+    general_sockets_count = max(0, kitchen_total_sockets - 2)  # minimum after subtracting unit + fridge
+    # Clearances per PUE/SP standards
+    avoid_door_ft = mm_to_ft(float(rules.get('kitchen_avoid_door_mm', 200) or 200))
+    avoid_window_ft = mm_to_ft(float(rules.get('kitchen_avoid_window_mm', 100) or 100))
 
-    wall_end_clear_mm = int(rules.get('kitchen_wall_end_clear_mm', 100) or 100)
+    wall_end_clear_mm = int(rules.get('kitchen_wall_end_clear_mm', 150) or 150)
     wall_end_clear_ft = mm_to_ft(wall_end_clear_mm)
 
     fixture_wall_max_dist_ft = mm_to_ft(int(rules.get('kitchen_fixture_wall_max_dist_mm', 2000) or 2000))
@@ -625,10 +91,10 @@ def main():
 
     fams = rules.get('family_type_names', {})
     prefer_unit = fams.get('socket_kitchen_unit') or (
-        u'TSL_EF_�_��_�_IP20_���_1P+N+PE_2� : TSL_EF_�_��_�_IP20_���_1P+N+PE_2�'
+        u'TSL_EF_\u0442_\u0421\u0422_\u0432_IP20_\u0420\u0437\u0442_1P+N+PE_2\u043f : TSL_EF_\u0442_\u0421\u0422_\u0432_IP20_\u0420\u0437\u0442_1P+N+PE_2\u043f'
     )
     if isinstance(prefer_unit, (list, tuple)):
-        prefer_unit = sorted(prefer_unit, key=lambda x: (0 if u'_2�' in (x or u'') else 1))
+        prefer_unit = sorted(prefer_unit, key=lambda x: (0 if u'_2\u043f' in (x or u'') else 1))
 
     def _try_pick_any(names):
         if not names:
@@ -654,17 +120,17 @@ def main():
                 sym_unit_lbl = placement_engine.format_family_type(sym_unit)
             except Exception:
                 sym_unit_lbl = None
-            output.print_md('Warning: unit socket type does not support face placement; fallback used.')
+            output.print_md(u'Warning: unit socket type does not support face placement; fallback used.')
         else:
-            alert('�� ������ ��� ������� ��� ����� (��������).')
+            alert(u'\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0442\u0438\u043f \u0440\u043e\u0437\u0435\u0442\u043a\u0438 \u0434\u043b\u044f \u043a\u0443\u0445\u043d\u0438 (\u0433\u0430\u0440\u043d\u0438\u0442\u0443\u0440).')
             if top10:
-                output.print_md('��������� ��������:')
+                output.print_md(u'\u0414\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0435 \u0432\u0430\u0440\u0438\u0430\u043d\u0442\u044b:')
                 for x in top10:
-                    output.print_md('- {0}'.format(x))
+                    output.print_md(u'- {0}'.format(x))
             return
 
     prefer_fridge = fams.get('socket_kitchen_fridge') or (
-        u'TSL_EF_�_��_�_IP20_���_1P+N+PE'
+        u'TSL_EF_\u0442_\u0421\u0422_\u0432_IP20_\u0420\u0437\u0442_1P+N+PE'
     )
     sym_fridge, sym_fridge_lbl, _top10f = su._pick_socket_symbol(doc, cfg, prefer_fridge, cache_prefix='socket_kitchen_fridge')
     if not sym_fridge:
@@ -677,17 +143,29 @@ def main():
     if not sym_fridge:
         sym_fridge = sym_unit
         sym_fridge_lbl = sym_unit_lbl
-        output.print_md('Warning: fridge socket type not found; using unit socket type.')
+        output.print_md(u'Warning: fridge socket type not found; using unit socket type.')
+        
+    prefer_general = fams.get('socket_kitchen_general') or (
+        u'TSL_EF_\u0442_\u0421\u0422_\u0432_IP20_\u0420\u0437\u0442_1P+N+PE'
+    )
+    sym_general, sym_general_lbl, _top10g = su._pick_socket_symbol(doc, cfg, prefer_general, cache_prefix='socket_kitchen_general')
+    if not sym_general:
+        sym_general = _try_pick_any(prefer_general)
+    if not sym_general:
+        sym_general = sym_fridge  # Fallback to fridge (single) socket
+        sym_general_lbl = sym_fridge_lbl
 
     try:
         su._store_symbol_id(cfg, 'last_socket_kitchen_unit_symbol_id', sym_unit)
         su._store_symbol_unique_id(cfg, 'last_socket_kitchen_unit_symbol_uid', sym_unit)
         su._store_symbol_id(cfg, 'last_socket_kitchen_fridge_symbol_id', sym_fridge)
         su._store_symbol_unique_id(cfg, 'last_socket_kitchen_fridge_symbol_uid', sym_fridge)
+        su._store_symbol_id(cfg, 'last_socket_kitchen_general_symbol_id', sym_general)
+        su._store_symbol_unique_id(cfg, 'last_socket_kitchen_general_symbol_uid', sym_general)
         script.save_config()
     except Exception:
         pass
-    link_inst = su._select_link_instance_ru(doc, 'Выберите связь АР')
+    link_inst = su._select_link_instance_ru(doc, u'\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0432\u044f\u0437\u044c \u0410\u0420')
     if not link_inst:
         return
     link_doc = link_reader.get_link_doc(link_inst)
@@ -721,7 +199,7 @@ def main():
                 sink_sym = None
         if sink_sym is not None:
             try:
-                sinks_all = _collect_family_instance_points_by_symbol_id(link_doc, int(sink_sym.Id.IntegerValue))
+                sinks_all = domain._collect_family_instance_points_by_symbol_id(link_doc, int(sink_sym.Id.IntegerValue))
             except Exception:
                 sinks_all = []
     except Exception:
@@ -734,13 +212,13 @@ def main():
         # Fallback: ask user to pick one sink instance in the link to learn its type.
         try:
             pick = forms.alert(
-                'Не найдено раковин в связи АР.\n\nВыберите ОДНУ мойку в связи, чтобы скрипт смог найти все такие мойки (по типу).',
+                u'\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e \u0440\u0430\u043a\u043e\u0432\u0438\u043d \u0432 \u0441\u0432\u044f\u0437\u0438 \u0410\u0420.\n\n\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u041e\u0414\u041d\u0423 \u043c\u043e\u0439\u043a\u0443 \u0432 \u0441\u0432\u044f\u0437\u0438, \u0447\u0442\u043e\u0431\u044b \u0441\u043a\u0440\u0438\u043f\u0442 \u0441\u043c\u043e\u0433 \u043d\u0430\u0439\u0442\u0438 \u0432\u0441\u0435 \u0442\u0430\u043a\u0438\u0435 \u043c\u043e\u0439\u043a\u0438 (\u043f\u043e \u0442\u0438\u043f\u0443).',
                 yes=True, no=True
             )
         except Exception:
             pick = False
         if pick:
-            e = _pick_linked_element_any(link_inst, 'Выберите мойку (связь АР)')
+            e = domain._pick_linked_element_any(link_inst, u'\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043c\u043e\u0439\u043a\u0443 (\u0441\u0432\u044f\u0437\u044c \u0410\u0420)')
             if e is not None and isinstance(e, DB.FamilyInstance):
                 try:
                     sym0 = e.Symbol
@@ -748,7 +226,7 @@ def main():
                     sym0 = None
                 if sym0 is not None:
                     try:
-                        sinks_all = _collect_family_instance_points_by_symbol_id(link_doc, int(sym0.Id.IntegerValue))
+                        sinks_all = domain._collect_family_instance_points_by_symbol_id(link_doc, int(sym0.Id.IntegerValue))
                     except Exception:
                         sinks_all = []
                     if sinks_all:
@@ -768,9 +246,13 @@ def main():
     stoves_all = su._collect_stoves_points(link_doc, rules)
 
     fridges_all = su._collect_fridges_points(link_doc, rules)
-    fridges_all.extend(_collect_fridge_by_visibility_param(link_doc))
+    try:
+        if hasattr(domain, '_collect_fridge_by_visibility_param'):
+            fridges_all.extend(domain._collect_fridge_by_visibility_param(link_doc))
+    except Exception:
+        pass
 
-    output.print_md('Раковины: **{0}**; Электроплиты: **{1}**; Холодильники: **{2}**'.format(
+    output.print_md(u'\u0420\u0430\u043a\u043e\u0432\u0438\u043d\u044b: **{0}**; \u042d\u043b\u0435\u043a\u0442\u0440\u043e\u043f\u043b\u0438\u0442\u044b: **{1}**; \u0425\u043e\u043b\u043e\u0434\u0438\u043b\u044c\u043d\u0438\u043a\u0438: **{2}**'.format(
         len(sinks_all or []), len(stoves_all or []), len(fridges_all or [])))
 
     # Rooms selection:
@@ -790,7 +272,7 @@ def main():
             continue
 
     for pt in (stoves_all or []):
-        r = _try_get_room_at_point(link_doc, pt)
+        r = domain._try_get_room_at_point(link_doc, pt)
         if r is None:
             continue
         try:
@@ -800,7 +282,7 @@ def main():
 
     # Also include sink-rooms only if they match kitchen patterns (avoid bathrooms)
     for pt in (sinks_all or []):
-        r = _try_get_room_at_point(link_doc, pt)
+        r = domain._try_get_room_at_point(link_doc, pt)
         if r is None:
             continue
         try:
@@ -816,39 +298,43 @@ def main():
     rooms = [rooms_by_id[k] for k in sorted(rooms_by_id.keys())]
 
     if not rooms:
-        alert('Нет помещений кухни (по паттернам и/или по электроплите).')
+        alert(u'\u041d\u0435\u0442 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439 \u043a\u0443\u0445\u043d\u0438 (\u043f\u043e \u043f\u0430\u0442\u0442\u0435\u0440\u043d\u0430\u043c \u0438/\u0438\u043b\u0438 \u043f\u043e \u044d\u043b\u0435\u043a\u0442\u0440\u043e\u043f\u043b\u0438\u0442\u0435).')
         return
 
-    host_sockets = _collect_host_socket_instances(doc)
+    host_sockets = domain._collect_host_socket_instances(doc)
 
     try:
-        ids_before_unit, _elems_before_unit, _pts_before_unit = _collect_tagged_instances(doc, comment_value_unit)
+        ids_before_unit, _elems_before_unit, _pts_before_unit = domain._collect_tagged_instances(doc, comment_value_unit)
     except Exception:
         ids_before_unit = set()
     try:
-        ids_before_fridge, _elems_before_fridge, _pts_before_fridge = _collect_tagged_instances(doc, comment_value_fridge)
+        ids_before_fridge, _elems_before_fridge, _pts_before_fridge = domain._collect_tagged_instances(doc, comment_value_fridge)
     except Exception:
         ids_before_fridge = set()
+    try:
+        ids_before_general, _elems_before_general, _pts_before_general = domain._collect_tagged_instances(doc, comment_value_general)
+    except Exception:
+        ids_before_general = set()
 
     # Fix height for already placed kitchen-unit sockets (tagged)
     fixed_existing_unit = 0
     fixed_existing_fridge = 0
     try:
-        _ids0, elems0, _pts0 = _collect_tagged_instances(doc, comment_value_unit)
+        _ids0, elems0, _pts0 = domain._collect_tagged_instances(doc, comment_value_unit)
     except Exception:
         elems0 = []
     try:
-        _ids1, elems1, _pts1 = _collect_tagged_instances(doc, comment_value_fridge)
+        _ids1, elems1, _pts1 = domain._collect_tagged_instances(doc, comment_value_fridge)
     except Exception:
         elems1 = []
     if elems0 or elems1:
         try:
-            with tx('ЭОМ: Кухня гарнитур - исправить высоту', doc=doc, swallow_warnings=True):
+            with tx(u'\u042d\u041e\u041c: \u041a\u0443\u0445\u043d\u044f \u0433\u0430\u0440\u043d\u0438\u0442\u0443\u0440 - \u0438\u0441\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0432\u044b\u0441\u043e\u0442\u0443', doc=doc, swallow_warnings=True):
                 for e0 in elems0:
-                    if _try_set_offset_from_level(e0, height_ft):
+                    if domain._try_set_offset_from_level(e0, height_ft):
                         fixed_existing_unit += 1
                 for e1 in elems1:
-                    if _try_set_offset_from_level(e1, fridge_height_ft):
+                    if domain._try_set_offset_from_level(e1, fridge_height_ft):
                         fixed_existing_fridge += 1
         except Exception:
             fixed_existing_unit = 0
@@ -873,12 +359,13 @@ def main():
 
     _register_sym_flags(sym_unit)
     _register_sym_flags(sym_fridge)
+    _register_sym_flags(sym_general)
 
     strict_hosting_mode_unit = True
     try:
         if sym_unit and sym_flags.get(int(sym_unit.Id.IntegerValue), (False, False))[1]:
             strict_hosting_mode_unit = False
-            output.print_md(u'**��������:** ��� ������� OneLevelBased - ���������� ����� ��� �����.')
+            output.print_md(u'**\u0412\u043d\u0438\u043c\u0430\u043d\u0438\u0435:** \u0422\u0438\u043f \u0440\u043e\u0437\u0435\u0442\u043a\u0438 OneLevelBased (Unit) - \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u043c \u0440\u0435\u0436\u0438\u043c \u0431\u0435\u0437 \u0445\u043e\u0441\u0442\u0430.')
     except Exception:
         pass
 
@@ -886,14 +373,23 @@ def main():
     try:
         if sym_fridge and sym_flags.get(int(sym_fridge.Id.IntegerValue), (False, False))[1]:
             strict_hosting_mode_fridge = False
-            output.print_md(u'**��������:** ��� ������� OneLevelBased - ���������� ����� ��� �����.')
+            output.print_md(u'**\u0412\u043d\u0438\u043c\u0430\u043d\u0438\u0435:** \u0422\u0438\u043f \u0440\u043e\u0437\u0435\u0442\u043a\u0438 OneLevelBased (Fridge) - \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u043c \u0440\u0435\u0436\u0438\u043c \u0431\u0435\u0437 \u0445\u043e\u0441\u0442\u0430.')
     except Exception:
         pass
+        pass
+    
+    strict_hosting_mode_general = True
+    try:
+        if sym_general and sym_flags.get(int(sym_general.Id.IntegerValue), (False, False))[1]:
+            strict_hosting_mode_general = False
+            output.print_md(u'**\u0412\u043d\u0438\u043c\u0430\u043d\u0438\u0435:** \u0422\u0438\u043f \u0440\u043e\u0437\u0435\u0442\u043a\u0438 OneLevelBased (General) - \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u043c \u0440\u0435\u0436\u0438\u043c \u0431\u0435\u0437 \u0445\u043e\u0441\u0442\u0430.')
+    except Exception:
         pass
 
     sp_cache = {}
     pending_unit = []
     pending_fridge = []
+    pending_general = []
     plans = []
 
     debug_no_candidates_shown = 0
@@ -935,27 +431,27 @@ def main():
             'details': details or u''
         })
 
-    with forms.ProgressBar(title='02. Кухня (гарнитур)...', cancellable=True) as pb:
+    with forms.ProgressBar(title=u'02. \u041a\u0443\u0445\u043d\u044f (\u0433\u0430\u0440\u043d\u0438\u0442\u0443\u0440)...', cancellable=True) as pb:
         pb.max_value = len(rooms)
         for i, room in enumerate(rooms):
             if pb.cancelled:
                 break
             pb.update_progress(i, pb.max_value)
 
-            segs = _get_wall_segments(room, link_doc)
+            segs = domain._get_wall_segments(room, link_doc)
             if not segs:
                 skipped += 1
                 skip_no_segs += 1
-                _push_skip(room, 'segs', u'нет сегментов стен')
+                _push_skip(room, 'segs', u'\u043d\u0435\u0442 \u0441\u0435\u0433\u043c\u0435\u043d\u0442\u043e\u0432 \u0441\u0442\u0435\u043d')
                 continue
 
-            sinks = _points_in_room(sinks_all, room)
-            stoves = _points_in_room(stoves_all, room)
-            fridges = _points_in_room(fridges_all, room)
+            sinks = domain._points_in_room(sinks_all, room)
+            stoves = domain._points_in_room(stoves_all, room)
+            fridges = domain._points_in_room(fridges_all, room)
             if not sinks and not stoves:
                 skipped += 1
                 skip_no_fixtures += 1
-                _push_skip(room, 'fixtures', u'не найдены мойка/плита')
+                _push_skip(room, 'fixtures', u'\u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b \u043c\u043e\u0439\u043a\u0430/\u043f\u043b\u0438\u0442\u0430')
                 continue
 
             # For rooms that don't look like a kitchen by name (e.g. "Гостиная"),
@@ -972,7 +468,7 @@ def main():
                 _push_skip(
                     room,
                     'fixtures',
-                    u'не кухня по названию и нет пары (мойка+плита); sinks={0}, stoves={1}'.format(len(sinks or []), len(stoves or []))
+                    u'\u043d\u0435 \u043a\u0443\u0445\u043d\u044f \u043f\u043e \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u044e \u0438 \u043d\u0435\u0442 \u043f\u0430\u0440\u044b (\u043c\u043e\u0439\u043a\u0430+\u043f\u043b\u0438\u0442\u0430); sinks={0}, stoves={1}'.format(len(sinks or []), len(stoves or []))
                 )
                 continue
 
@@ -983,7 +479,7 @@ def main():
                 best_d = None
                 for s in sinks:
                     for p in stoves:
-                        d = _dist_xy(s, p)
+                        d = domain._dist_xy(s, p)
                         if best_d is None or d < best_d:
                             best_d = d
                             best_sink = s
@@ -993,7 +489,7 @@ def main():
             best_fridge = fridges[0] if fridges else None
             if fridges and best_stove:
                 try:
-                    fr_sorted = sorted(fridges, key=lambda x: _dist_xy(x, best_stove))
+                    fr_sorted = sorted(fridges, key=lambda x: domain._dist_xy(x, best_stove))
                     best_fridge = fr_sorted[0] if fr_sorted else best_fridge
                 except Exception:
                     pass
@@ -1014,7 +510,7 @@ def main():
                         continue
                     if not pt_link:
                         continue
-                    if _points_in_room([pt_link], room):
+                    if domain._points_in_room([pt_link], room):
                         existing_link_pts.append(pt_link)
                         if not existing_idx.has_near(float(pt_link.X), float(pt_link.Y), float(pt_link.Z), float(existing_dedupe_ft)):
                             existing_cnt += 1
@@ -1022,7 +518,7 @@ def main():
 
             # Requirement: one socket between sink+stove (top) and one near fridge (bottom).
             need_unit = 1
-            need_fridge = 1 if fridges else 0
+            need_fridge = 1  # Always need fridge socket (300mm) in kitchen
             capacity = max(0, int(total_target) - int(existing_cnt))
             if need_unit and need_fridge:
                 capacity = max(int(capacity), 2)
@@ -1032,7 +528,7 @@ def main():
             if need <= 0:
                 skipped += 1
                 skip_full += 1
-                _push_skip(room, 'full', u'уже {0}/{1} розеток в помещении'.format(int(existing_cnt), int(total_target)))
+                _push_skip(room, 'full', u'\u0443\u0436\u0435 {0}/{1} \u0440\u043e\u0437\u0435\u0442\u043e\u043a \u0432 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0438'.format(int(existing_cnt), int(total_target)))
                 continue
 
             # Build dedupe index in link XY
@@ -1043,8 +539,8 @@ def main():
                 except Exception:
                     continue
 
-            seg_sink, proj_sink, _ = _nearest_segment(best_sink, segs) if best_sink else (None, None, None)
-            seg_stove, proj_stove, _ = _nearest_segment(best_stove, segs) if best_stove else (None, None, None)
+            seg_sink, proj_sink, _ = domain._nearest_segment(best_sink, segs) if best_sink else (None, None, None)
+            seg_stove, proj_stove, _ = domain._nearest_segment(best_stove, segs) if best_stove else (None, None, None)
             sink_wall_id = None
             stove_wall_id = None
             try:
@@ -1056,7 +552,7 @@ def main():
             except Exception:
                 stove_wall_id = None
 
-            seg_fr, proj_fr, _ = _nearest_segment(best_fridge, segs) if best_fridge else (None, None, None)
+            seg_fr, proj_fr, _ = domain._nearest_segment(best_fridge, segs) if best_fridge else (None, None, None)
             fridge_wall_id = None
             try:
                 fridge_wall_id = int(seg_fr[2].Id.IntegerValue) if seg_fr and seg_fr[2] else None
@@ -1070,19 +566,20 @@ def main():
                     if int(seg_sink[2].Id.IntegerValue) == int(seg_stove[2].Id.IntegerValue):
                         seg_between = seg_sink
                         try:
-                            if _dist_xy(seg_stove[0], seg_stove[1]) > _dist_xy(seg_sink[0], seg_sink[1]):
+                            if domain._dist_xy(seg_stove[0], seg_stove[1]) > domain._dist_xy(seg_sink[0], seg_sink[1]):
                                 seg_between = seg_stove
                         except Exception:
                             seg_between = seg_sink
                         p0b, p1b, _wb = seg_between
-                        pt_between = kup.midpoint_between_projections_xy(
-                            best_sink,
-                            best_stove,
-                            p0b,
-                            p1b,
-                            end_clear=wall_end_clear_ft,
-                            point_factory=DB.XYZ,
-                        )
+                        # pt_between = kup.midpoint_between_projections_xy(
+                        #     best_sink,
+                        #     best_stove,
+                        #     p0b,
+                        #     p1b,
+                        #     end_clear=wall_end_clear_ft,
+                        #     point_factory=DB.XYZ,
+                        # )
+                        pt_between = None  # Temporary disable kup usage
                         if pt_between:
                             candidates.append({
                                 'priority': 0,
@@ -1126,11 +623,11 @@ def main():
                 scored = []
                 for sg in segs_try:
                     p0, p1, wall = sg
-                    proj = _closest_point_on_segment_xy(src_pt, p0, p1)
+                    proj = domain._closest_point_on_segment_xy(src_pt, p0, p1)
                     if proj is None:
                         continue
                     try:
-                        dperp = _dist_xy(src_pt, proj)
+                        dperp = domain._dist_xy(src_pt, proj)
                     except Exception:
                         dperp = None
                     if dperp is not None and fixture_wall_max_dist_ft and dperp > float(fixture_wall_max_dist_ft):
@@ -1141,13 +638,13 @@ def main():
                 for _dperp, sg, proj in scored:
                     p0, p1, wall = sg
                     try:
-                        seg_len = _dist_xy(p0, p1)
+                        seg_len = domain._dist_xy(p0, p1)
                     except Exception:
                         seg_len = 0.0
                     if seg_len <= 1e-6:
                         continue
                     try:
-                        t0 = _dist_xy(p0, proj) / seg_len
+                        t0 = domain._dist_xy(p0, proj) / seg_len
                     except Exception:
                         continue
                     dt = float(offset_ft or 0.0) / float(seg_len)
@@ -1159,7 +656,7 @@ def main():
                     if prefer_sign in (-1, 1):
                         signs = [int(prefer_sign), int(-prefer_sign)]
                     else:
-                        signs = [1, -1]
+                        signs = [-1, 1]
 
                     added = False
                     for sgn in signs:
@@ -1213,7 +710,9 @@ def main():
                         prefer_sign = None
                 _offset_candidates_for_fixture(best_stove, seg_stove, offset_stove_ft, prefer_sign=prefer_sign, priority=1, kind=u'stove')
 
+            # Fridge socket candidate (300mm height)
             if seg_fr and proj_fr:
+                # Fridge found - place socket near it
                 candidates.append({
                     'priority': 2,
                     'seg': seg_fr,
@@ -1222,28 +721,70 @@ def main():
                     'height_ft': float(fridge_height_ft),
                     'comment_value': comment_value_fridge,
                 })
+            else:
+                # No fridge found - place socket at opposite end of kitchen wall from sink/stove
+                # Use the same wall as sink/stove but at the far end
+                fridge_seg = None
+                fridge_pt = None
+                ref_seg = seg_stove if seg_stove else seg_sink
+                ref_proj = proj_stove if proj_stove else proj_sink
+                if ref_seg and ref_proj:
+                    p0, p1, wall = ref_seg
+                    try:
+                        seg_len = domain._dist_xy(p0, p1)
+                        if seg_len and seg_len > 1e-6:
+                            # Find which end is farther from ref_proj
+                            d0 = domain._dist_xy(ref_proj, p0)
+                            d1 = domain._dist_xy(ref_proj, p1)
+                            end_tol = float(wall_end_clear_ft or 0.0)
+                            if d0 > d1:
+                                # p0 is farther, place near p0
+                                t_fridge = end_tol / seg_len if seg_len > 1e-6 else 0.1
+                                t_fridge = max(0.05, min(t_fridge, 0.4))
+                            else:
+                                # p1 is farther, place near p1
+                                t_fridge = 1.0 - (end_tol / seg_len if seg_len > 1e-6 else 0.1)
+                                t_fridge = max(0.6, min(t_fridge, 0.95))
+                            fridge_pt = DB.XYZ(
+                                float(p0.X) + (float(p1.X) - float(p0.X)) * t_fridge,
+                                float(p0.Y) + (float(p1.Y) - float(p0.Y)) * t_fridge,
+                                float(ref_proj.Z)
+                            )
+                            fridge_seg = ref_seg
+                    except Exception:
+                        fridge_seg = None
+                        fridge_pt = None
+                if fridge_seg and fridge_pt:
+                    candidates.append({
+                        'priority': 2,
+                        'seg': fridge_seg,
+                        'pt': fridge_pt,
+                        'kind': u'fridge',
+                        'height_ft': float(fridge_height_ft),
+                        'comment_value': comment_value_fridge,
+                    })
 
             if not candidates:
                 skipped += 1
                 skip_no_candidates += 1
-                _push_skip(room, 'candidates', u'нет подходящих точек для размещения (после фильтров)')
+                _push_skip(room, 'candidates', u'\u043d\u0435\u0442 \u043f\u043e\u0434\u0445\u043e\u0434\u044f\u0449\u0438\u0445 \u0442\u043e\u0447\u0435\u043a \u0434\u043b\u044f \u0440\u0430\u0437\u043c\u0435\u0449\u0435\u043d\u0438\u044f (\u043f\u043e\u0441\u043b\u0435 \u0444\u0438\u043b\u044c\u0442\u0440\u043e\u0432)')
                 if debug_no_candidates_shown < debug_no_candidates_limit:
                     try:
-                        output.print_md('Нет кандидатов: room #{0} **{1}**'.format(int(room.Id.IntegerValue), su._room_text(room)))
+                        output.print_md(u'\u041d\u0435\u0442 \u043a\u0430\u043d\u0434\u0438\u0434\u0430\u0442\u043e\u0432: room #{0} **{1}**'.format(int(room.Id.IntegerValue), su._room_text(room)))
                         if best_stove and seg_stove:
                             p0, p1, _w = seg_stove
-                            seg_len = _dist_xy(p0, p1)
-                            proj0 = _closest_point_on_segment_xy(best_stove, p0, p1)
-                            t0 = (_dist_xy(p0, proj0) / seg_len) if (proj0 and seg_len and seg_len > 1e-6) else None
+                            seg_len = domain._dist_xy(p0, p1)
+                            proj0 = domain._closest_point_on_segment_xy(best_stove, p0, p1)
+                            t0 = (domain._dist_xy(p0, proj0) / seg_len) if (proj0 and seg_len and seg_len > 1e-6) else None
                             dt = (float(offset_stove_ft) / float(seg_len)) if (seg_len and seg_len > 1e-6) else None
-                            output.print_md('- stove: seg_len_ft={0}, t0={1}, dt={2}'.format(seg_len, t0, dt))
+                            output.print_md(u'- stove: seg_len_ft={0}, t0={1}, dt={2}'.format(seg_len, t0, dt))
                         if best_sink and seg_sink:
                             p0, p1, _w = seg_sink
-                            seg_len = _dist_xy(p0, p1)
-                            proj0 = _closest_point_on_segment_xy(best_sink, p0, p1)
-                            t0 = (_dist_xy(p0, proj0) / seg_len) if (proj0 and seg_len and seg_len > 1e-6) else None
+                            seg_len = domain._dist_xy(p0, p1)
+                            proj0 = domain._closest_point_on_segment_xy(best_sink, p0, p1)
+                            t0 = (domain._dist_xy(p0, proj0) / seg_len) if (proj0 and seg_len and seg_len > 1e-6) else None
                             dt = (float(offset_sink_ft) / float(seg_len)) if (seg_len and seg_len > 1e-6) else None
-                            output.print_md('- sink: seg_len_ft={0}, t0={1}, dt={2}'.format(seg_len, t0, dt))
+                            output.print_md(u'- sink: seg_len_ft={0}, t0={1}, dt={2}'.format(seg_len, t0, dt))
                     except Exception:
                         pass
                     debug_no_candidates_shown += 1
@@ -1273,21 +814,22 @@ def main():
 
                 # clearance checks (>= 600mm by default)
                 if kind != u'fridge':
-                    if best_sink and clear_sink_ft and (_dist_xy(pt_xy, best_sink) + 1e-9) < float(clear_sink_ft):
+                    if best_sink and clear_sink_ft and (domain._dist_xy(pt_xy, best_sink) + 1e-9) < float(clear_sink_ft):
                         continue
-                    if best_stove and clear_stove_ft and (_dist_xy(pt_xy, best_stove) + 1e-9) < float(clear_stove_ft):
+                    if best_stove and clear_stove_ft and (domain._dist_xy(pt_xy, best_stove) + 1e-9) < float(clear_stove_ft):
                         continue
 
                 # on-wall proximity (segment projection)
                 p0, p1, wall = seg
-                proj = _closest_point_on_segment_xy(pt_xy, p0, p1)
+                proj = domain._closest_point_on_segment_xy(pt_xy, p0, p1)
                 if proj is None:
                     continue
-                if _dist_xy(pt_xy, proj) > float(validate_wall_dist_ft or mm_to_ft(150)):
+                if domain._dist_xy(pt_xy, proj) > float(validate_wall_dist_ft or mm_to_ft(150)):
                     continue
 
-                # dedupe (XY)
-                if idx.has_near(float(pt_xy.X), float(pt_xy.Y), 0.0, float(dedupe_ft or mm_to_ft(300))):
+                # dedupe (XY) - skip for fridge since it's at different height (300mm vs 1100mm)
+                # and should be placed even if unit socket is nearby
+                if kind != u'fridge' and idx.has_near(float(pt_xy.X), float(pt_xy.Y), 0.0, float(dedupe_ft or mm_to_ft(300))):
                     continue
 
                 idx.add(float(pt_xy.X), float(pt_xy.Y), 0.0)
@@ -1360,6 +902,84 @@ def main():
                     created_pt += int(cpt)
                     pending_fridge = []
 
+            # --- Perimeter / General Sockets Logic ---
+            unit_bboxes = domain._collect_kitchen_unit_bboxes(link_doc, room, segs)
+            p_allowed, p_len = domain._calculate_perimeter_allowed_path(
+                link_doc, room, segs, avoid_door_ft, avoid_window_ft, 
+                {}, 
+                unit_bboxes, unit_margin_ft
+            )
+            
+            actual_general_count = max(general_sockets_count, int(p_len / float(general_spacing_ft or 1.0)))
+            output.print_md(
+                u'Периметр кухни: **{0:.2f} ft**, general min={1}, spacing={2:.2f} ft, расчет={3}'.format(
+                    float(p_len or 0.0),
+                    int(general_sockets_count),
+                    float(general_spacing_ft or 0.0),
+                    int(actual_general_count)
+                )
+            )
+            p_cands = domain._generate_perimeter_candidates(
+                p_allowed,
+                p_len,
+                general_spacing_ft,
+                wall_end_clear_ft,
+                num_sockets=actual_general_count
+            )
+
+            general_idx = su._XYZIndex(cell_ft=max(1.0, float(general_spacing_ft or 0.0)))
+            for gen_pt_host in (_pts_before_general or []):
+                try:
+                    gen_pt_link = t_inv.OfPoint(gen_pt_host) if t_inv else gen_pt_host
+                except Exception:
+                    continue
+                if gen_pt_link is None:
+                    continue
+                try:
+                    general_idx.add(float(gen_pt_link.X), float(gen_pt_link.Y), 0.0)
+                except Exception:
+                    continue
+
+            for wall, pt, v in p_cands:
+                if idx.has_near(float(pt.X), float(pt.Y), 0.0, float(dedupe_ft)):
+                    continue
+                if general_idx.has_near(float(pt.X), float(pt.Y), 0.0, float(dedupe_ft)):
+                    continue
+                if best_sink and clear_sink_ft and (domain._dist_xy(pt, best_sink) < float(clear_sink_ft)):
+                    continue
+                if best_stove and clear_stove_ft and (domain._dist_xy(pt, best_stove) < float(clear_stove_ft)):
+                    continue
+                idx.add(float(pt.X), float(pt.Y), 0.0)
+                general_idx.add(float(pt.X), float(pt.Y), 0.0)
+                
+                try: wall_id = int(wall.Id.IntegerValue)
+                except: wall_id = None
+                
+                pt_link = DB.XYZ(float(pt.X), float(pt.Y), float(base_z) + float(general_height_ft))
+                
+                pending_general.append((wall, pt_link, v, sym_general, 0.0))
+                
+                plans.append({
+                    'room_id': int(room.Id.IntegerValue),
+                    'room_name': su._room_text(room),
+                    'kind': u'general',
+                    'comment_value': comment_value_general,
+                    'height_ft': float(general_height_ft),
+                    'wall_id': wall_id
+                })
+                prepared += 1
+                
+                if len(pending_general) >= batch_size:
+                    c, cf, cwp, cpt, _snf, _snp, _cver = su._place_socket_batch(
+                        doc, link_inst, t, pending_general, sym_flags, sp_cache, comment_value_general, strict_hosting=strict_hosting_mode_general
+                    )
+                    created += int(c)
+                    created_face += int(cf)
+                    created_wp += int(cwp)
+                    created_pt += int(cpt)
+                    pending_general = []
+
+
     if pending_unit:
         c, cf, cwp, cpt, _snf, _snp, _cver = su._place_socket_batch(
             doc, link_inst, t, pending_unit, sym_flags, sp_cache, comment_value_unit, strict_hosting=strict_hosting_mode_unit
@@ -1376,16 +996,26 @@ def main():
         created_face += int(cf)
         created_wp += int(cwp)
         created_pt += int(cpt)
+    if pending_general:
+        c, cf, cwp, cpt, _snf, _snp, _cver = su._place_socket_batch(
+            doc, link_inst, t, pending_general, sym_flags, sp_cache, comment_value_general, strict_hosting=strict_hosting_mode_general
+        )
+        created += int(c)
+        created_face += int(cf)
+        created_wp += int(cwp)
+        created_pt += int(cpt)
 
     # Fridge sockets moved to 02_Kitchen script (SOCKET_FRIDGE)
 
-    ids_after_unit, elems_after_unit, _pts_after_unit = _collect_tagged_instances(doc, comment_value_unit)
-    ids_after_fridge, elems_after_fridge, _pts_after_fridge = _collect_tagged_instances(doc, comment_value_fridge)
+    ids_after_unit, elems_after_unit, _pts_after_unit = domain._collect_tagged_instances(doc, comment_value_unit)
+    ids_after_fridge, elems_after_fridge, _pts_after_fridge = domain._collect_tagged_instances(doc, comment_value_fridge)
+    ids_after_general, elems_after_general, _pts_after_general = domain._collect_tagged_instances(doc, comment_value_general)
     new_ids_unit = set(ids_after_unit or set()) - set(ids_before_unit or set())
     new_ids_fridge = set(ids_after_fridge or set()) - set(ids_before_fridge or set())
-    new_ids = set(new_ids_unit or set()) | set(new_ids_fridge or set())
+    new_ids_general = set(ids_after_general or set()) - set(ids_before_general or set())
+    new_ids = set(new_ids_unit or set()) | set(new_ids_fridge or set()) | set(new_ids_general or set())
     try:
-        elems_by_id = {int(e.Id.IntegerValue): e for e in ((elems_after_unit or []) + (elems_after_fridge or []))}
+        elems_by_id = {int(e.Id.IntegerValue): e for e in ((elems_after_unit or []) + (elems_after_fridge or []) + (elems_after_general or []))}
     except Exception:
         elems_by_id = {}
     new_elems = [elems_by_id[i] for i in sorted(new_ids) if i in elems_by_id]
@@ -1404,7 +1034,7 @@ def main():
 
             abs_z = None
             try:
-                abs_z = _get_abs_z_from_level_offset(e, doc)
+                abs_z = domain._get_abs_z_from_level_offset(e, doc)
             except Exception:
                 abs_z = None
             z_key = abs_z if abs_z is not None else float(pt.Z)
@@ -1428,7 +1058,7 @@ def main():
             for iid, e, pt, z_key in inst_items:
                 if iid in used_inst:
                     continue
-                dxy = _dist_xy(pt, exp_pt)
+                dxy = domain._dist_xy(pt, exp_pt)
                 if validate_match_tol_ft and dxy > validate_match_tol_ft:
                     continue
                 dz = abs(float(z_key) - float(exp_z)) if exp_z is not None else 0.0
@@ -1456,7 +1086,7 @@ def main():
 
             abs_z = None
             try:
-                abs_z = _get_abs_z_from_level_offset(inst, doc)
+                abs_z = domain._get_abs_z_from_level_offset(inst, doc)
             except Exception:
                 abs_z = None
             z_to_check = abs_z if abs_z is not None else float(inst_pt.Z)
@@ -1470,20 +1100,20 @@ def main():
             p0 = pl.get('seg_p0')
             p1 = pl.get('seg_p1')
             try:
-                seg_len = _dist_xy(p0, p1) if p0 and p1 else 0.0
+                seg_len = domain._dist_xy(p0, p1) if p0 and p1 else 0.0
             except Exception:
                 seg_len = 0.0
 
             # On-wall check vs planned segment
-            proj = _closest_point_on_segment_xy(inst_pt_link, p0, p1) if p0 and p1 else None
-            dist_wall = _dist_xy(inst_pt_link, proj) if proj else None
+            proj = domain._closest_point_on_segment_xy(inst_pt_link, p0, p1) if p0 and p1 else None
+            dist_wall = domain._dist_xy(inst_pt_link, proj) if proj else None
             on_wall_ok = (dist_wall is not None) and (dist_wall <= float(validate_wall_dist_ft or mm_to_ft(150)))
 
             # Compute position along segment
             ti = None
             if proj and seg_len and seg_len > 1e-6:
                 try:
-                    ti = _dist_xy(p0, proj) / seg_len
+                    ti = domain._dist_xy(p0, proj) / seg_len
                 except Exception:
                     ti = None
 
@@ -1494,11 +1124,11 @@ def main():
                     return None
                 if not (p0 and p1) or (not seg_len) or seg_len <= 1e-6 or ti is None:
                     return None
-                proj_a = _closest_point_on_segment_xy(axis_pt, p0, p1)
+                proj_a = domain._closest_point_on_segment_xy(axis_pt, p0, p1)
                 if proj_a is None:
                     return None
                 try:
-                    ta = _dist_xy(p0, proj_a) / seg_len
+                    ta = domain._dist_xy(p0, proj_a) / seg_len
                 except Exception:
                     return None
                 try:
@@ -1518,7 +1148,7 @@ def main():
                 if wall_id is not None and pl.get('sink_wall_id') == wall_id:
                     sink_d = _axis_dist_ft(sink_pt)
                 if sink_d is None:
-                    sink_d = _dist_xy(inst_pt_link, sink_pt)
+                    sink_d = domain._dist_xy(inst_pt_link, sink_pt)
                 sink_clear_ok = (sink_d + 1e-9) >= float(clear_sink_ft)
 
             if stove_pt is not None:
@@ -1526,7 +1156,7 @@ def main():
                 if wall_id is not None and pl.get('stove_wall_id') == wall_id:
                     stove_d = _axis_dist_ft(stove_pt)
                 if stove_d is None:
-                    stove_d = _dist_xy(inst_pt_link, stove_pt)
+                    stove_d = domain._dist_xy(inst_pt_link, stove_pt)
                 stove_clear_ok = (stove_d + 1e-9) >= float(clear_stove_ft)
 
             # Offset check: 600мм от оси «своего» прибора (вдоль стены)
@@ -1549,7 +1179,7 @@ def main():
                     fridge_ok = False
                 else:
                     try:
-                        fridge_ok = _dist_xy(inst_pt_link, fp) <= float(fridge_max_dist_ft or mm_to_ft(1500))
+                        fridge_ok = domain._dist_xy(inst_pt_link, fp) <= float(fridge_max_dist_ft or mm_to_ft(1500))
                     except Exception:
                         fridge_ok = False
 
@@ -1573,25 +1203,26 @@ def main():
             })
 
     output.print_md(
-        'Types: unit={0}; fridge={1}\n\nPrepared: **{2}**\nCreated: **{3}** (Face: {4}, WorkPlane: {5}, Point: {6})\nSkipped: **{7}**'.format(
+        u'Types: unit={0}; fridge={1}; general={2}\n\nPrepared: **{3}**\nCreated: **{4}** (Face: {5}, WorkPlane: {6}, Point: {7})\nSkipped: **{8}**'.format(
             sym_unit_lbl or u'<Socket>',
             sym_fridge_lbl or sym_unit_lbl or u'<Socket>',
+            sym_general_lbl or sym_fridge_lbl or u'<Socket>',
             prepared, created, created_face, created_wp, created_pt, skipped
         )
     )
 
     if fixed_existing_unit:
-        output.print_md('Fixed existing unit sockets: **{0}**'.format(fixed_existing_unit))
+        output.print_md(u'Fixed existing unit sockets: **{0}**'.format(fixed_existing_unit))
     if fixed_existing_fridge:
-        output.print_md('Fixed existing fridge sockets: **{0}**'.format(fixed_existing_fridge))
+        output.print_md(u'Fixed existing fridge sockets: **{0}**'.format(fixed_existing_fridge))
 
     if validation:
         okc = len([x for x in validation if x.get('status') == 'ok'])
         failc = len([x for x in validation if x.get('status') == 'fail'])
         missc = len([x for x in validation if x.get('status') == 'missing'])
-        output.print_md('Проверка: OK=**{0}**, FAIL=**{1}**, MISSING=**{2}**'.format(okc, failc, missc))
+        output.print_md(u'\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: OK=**{0}**, FAIL=**{1}**, MISSING=**{2}**'.format(okc, failc, missc))
         if failc or missc:
-            output.print_md('Нарушения:')
+            output.print_md(u'\u041d\u0430\u0440\u0443\u0448\u0435\u043d\u0438\u044f:')
             for x in validation:
                 st = x.get('status')
                 if st == 'ok':
@@ -1599,34 +1230,34 @@ def main():
                 rid = x.get('room_id')
                 rnm = x.get('room_name')
                 if st == 'missing':
-                    output.print_md('- room #{0} {1}: missing created instance (tag={2})'.format(rid, rnm, x.get('comment_value')))
+                    output.print_md(u'- room #{0} {1}: missing created instance (tag={2})'.format(rid, rnm, x.get('comment_value')))
                 else:
                     kind = x.get('kind')
                     if kind == 'fridge':
-                        output.print_md('- id {0} / room #{1} {2} ({3}): height={4}, on_wall={5}, fridge={6}'.format(
+                        output.print_md(u'- id {0} / room #{1} {2} ({3}): height={4}, on_wall={5}, fridge={6}'.format(
                             x.get('id'), rid, rnm, kind,
                             x.get('height_ok'), x.get('on_wall_ok'), x.get('fridge_ok')
                         ))
                     else:
-                        output.print_md('- id {0} / room #{1} {2} ({3}): height={4}, on_wall={5}, offset={6}, sink_clear={7}, stove_clear={8}'.format(
+                        output.print_md(u'- id {0} / room #{1} {2} ({3}): height={4}, on_wall={5}, offset={6}, sink_clear={7}, stove_clear={8}'.format(
                             x.get('id'), rid, rnm, kind,
                             x.get('height_ok'), x.get('on_wall_ok'), x.get('offset_ok'), x.get('sink_clear_ok'), x.get('stove_clear_ok')
                         ))
     if skipped:
-        output.print_md('Причины пропусков (шт.): segs={0}, full={1}, fixtures={2}, candidates={3}'.format(
+        output.print_md(u'\u041f\u0440\u0438\u0447\u0438\u043d\u044b \u043f\u0440\u043e\u043f\u0443\u0441\u043a\u043e\u0432 (\u0448\u0442.): segs={0}, full={1}, fixtures={2}, candidates={3}'.format(
             skip_no_segs, skip_full, (skip_no_fixtures + skip_not_kitchen), skip_no_candidates
         ))
 
     if skipped_details:
-        output.print_md('Пропущенные помещения (первые {0}):'.format(len(skipped_details)))
+        output.print_md(u'\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0435 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u044f (\u043f\u0435\u0440\u0432\u044b\u0435 {0}):'.format(len(skipped_details)))
         for x in skipped_details:
-            output.print_md('- room #{0} **{1}**: {2}{3}'.format(
+            output.print_md(u'- room #{0} **{1}**: {2}{3}'.format(
                 x.get('room_id'), x.get('room_name') or u'',
                 x.get('reason') or u'',
                 (u' — ' + x.get('details')) if x.get('details') else u''
             ))
         if skipped_details_more[0]:
-            output.print_md('More skipped rooms: **{0}** (limit kitchen_debug_skipped_rooms_limit)'.format(int(skipped_details_more[0])))
+            output.print_md(u'More skipped rooms: **{0}** (limit kitchen_debug_skipped_rooms_limit)'.format(int(skipped_details_more[0])))
 
 
 def _legacy():
@@ -1637,4 +1268,5 @@ def _legacy():
 
 
 if __name__ == '__main__':
-    hub_run(TOOL_ID, TOOL_VERSION, legacy_fn=_legacy)
+    _legacy()
+

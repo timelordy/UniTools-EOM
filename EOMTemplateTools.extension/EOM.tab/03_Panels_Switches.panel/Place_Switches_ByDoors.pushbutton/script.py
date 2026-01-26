@@ -146,31 +146,29 @@ def main():
                 # Для обычных комнат - ищем дверь в коридор
                 best_door = None
                 best_info = None
-            other_room = None
+                other_room = None
 
-            for door, info in door_list:
-                fr = info["from_room"]
-                tr = info["to_room"]
-                other = tr if (fr and fr.Id == room.Id) else fr
-                other_name = get_room_name(other) if other else u""
+                for door, info in door_list:
+                    fr = info["from_room"]
+                    tr = info["to_room"]
+                    other = tr if (fr and fr.Id == room.Id) else fr
+                    other_name = get_room_name(other) if other else u""
 
-                if contains_any(other_name, CORRIDOR_ROOMS):
-                    best_door = door
-                    best_info = info
-                    other_room = other
-                    break
+                    if contains_any(other_name, CORRIDOR_ROOMS):
+                        best_door = door
+                        best_info = info
+                        other_room = other
+                        break
 
-            if not best_door:
-                best_door, best_info = door_list[0]
-                fr = best_info["from_room"]
-                tr = best_info["to_room"]
-                other_room = tr if (fr and fr.Id == room.Id) else fr
+                if not best_door:
+                    best_door, best_info = door_list[0]
+                    fr = best_info["from_room"]
+                    tr = best_info["to_room"]
+                    other_room = tr if (fr and fr.Id == room.Id) else fr
 
-            is_wet = contains_any(room_name, WET_ROOMS)
-            is_two_gang = contains_any(room_name, TWO_GANG_ROOMS)
-
-            place_inside = not is_wet
-            target_room = room if place_inside else other_room
+                is_wet = contains_any(room_name, WET_ROOMS)
+                is_two_gang = contains_any(room_name, TWO_GANG_ROOMS)
+                place_inside = not is_wet
 
             symbol = sym_2g if is_two_gang else sym_1g
 

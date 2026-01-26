@@ -1051,6 +1051,17 @@ def select_link_instance(doc, title='Select AR Link', allow_none=False):
     if not links:
         return None
 
+    loaded_links = []
+    for ln in links:
+        try:
+            if is_link_loaded(ln):
+                loaded_links.append(ln)
+        except Exception:
+            continue
+
+    if len(loaded_links) == 1:
+        return loaded_links[0]
+
     items = []
     for ln in links:
         try:

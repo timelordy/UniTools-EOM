@@ -165,4 +165,5 @@ def run(doc, output):
         c0, _, _, _, _, _, _ = adapters.place_socket_batch(doc, link_inst, t, pending, sym_flags, sp_cache, comment_value, strict_hosting=strict_hosting_mode)
         created += c0
 
-    output.print_md('Готово. Создано розеток: **{0}**'.format(created))
+    output.print_md(u'Готово. Создано розеток: **{0}**'.format(created))
+    return created

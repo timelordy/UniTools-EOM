@@ -1,0 +1,4 @@
+layout:
+  - 01_Hub.pushbutton
+title: "Хаб"
+tooltip: Главное меню и счетчик эффективности

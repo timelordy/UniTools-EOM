@@ -1,10 +1,4 @@
-﻿title: "❄️ Разместить: Розетки для кондиционеров"
-tooltip: |
-  Расстановка розеток для кондиционеров в квартирах.
-  
-  Правила:
-  - Высота 300мм от потолка
-  - Отступ 200мм от стены (в углу)
-  - На стене рядом с корзиной для внешнего блока
-  - Не ставим на наружную стену
-author: "EOM Template Tools"
+layout:
+  title: "Кондиционеры"
+  doc: "Automatically places sockets for AC units in rooms adjacent to external AC baskets."
+  author: "EOM Tools"

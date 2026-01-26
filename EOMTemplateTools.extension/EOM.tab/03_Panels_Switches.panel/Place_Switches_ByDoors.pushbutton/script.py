@@ -11,18 +11,23 @@
 import math
 
 from pyrevit import DB, forms, revit, script
+from time_savings import report_time_saved
 
 from adapters import (
     calc_switch_position,
+    calc_switch_position_from_separation_line,
     get_closest_level,
     get_door_info,
     get_room_name,
+    get_room_separation_lines,
     get_switch_symbol,
     is_entrance_door,
     place_switch,
 )
 from constants import (
+    COMMENT_TAG,
     CORRIDOR_ROOMS,
+    NON_APARTMENT_ROOMS,
     SKIP_ROOMS,
     SWITCH_1G_TYPE_ID,
     SWITCH_2G_TYPE_ID,
@@ -108,16 +113,69 @@ def main():
             if contains_any(room_name, SKIP_ROOMS):
                 continue
 
-            is_corridor = contains_any(room_name, CORRIDOR_ROOMS)
-            
-            if room_id not in room_to_doors:
-                skipped += 1
+            # Пропускаем общедомовые помещения (не квартирные)
+            if contains_any(room_name, NON_APARTMENT_ROOMS):
                 continue
 
-            door_list = room_to_doors[room_id]
-            if not door_list:
-                skipped += 1
-                continue
+            is_corridor = contains_any(room_name, CORRIDOR_ROOMS)
+            
+            # Проверяем наличие дверей
+            has_doors = room_id in room_to_doors and room_to_doors[room_id]
+            
+            # Флаг для использования Room Separation Line
+            use_separation_line = False
+            sep_line_info = None
+            
+            if not has_doors:
+                # Нет дверей - пробуем найти Room Separation Line
+                sep_lines = get_room_separation_lines(link_doc, room, link_transform)
+                if sep_lines:
+                    # Берём первую (или самую длинную) линию
+                    sep_line_info = max(sep_lines, key=lambda x: x["line_length"])
+                    use_separation_line = True
+                else:
+                    skipped += 1
+                    continue
+            
+            door_list = room_to_doors.get(room_id, [])
+
+            # Если используем Room Separation Line (нет дверей)
+            if use_separation_line:
+                is_wet = contains_any(room_name, WET_ROOMS)
+                is_two_gang = contains_any(room_name, TWO_GANG_ROOMS)
+                best_info = None  # Нет двери
+                
+                symbol = sym_2g if is_two_gang else sym_1g
+                
+                point, rotation = calc_switch_position_from_separation_line(
+                    sep_line_info, room, link_transform, link_doc
+                )
+                
+                if created < 3 or "кухн" in room_name.lower():
+                    output.print_md(u"")
+                    output.print_md(u"**{}** (via Room Separation Line)".format(room_name))
+                    output.print_md(u"  line length: {:.0f}mm".format(ft_to_mm(sep_line_info["line_length"])))
+                    if point:
+                        output.print_md(u"  switch: ({:.0f}, {:.0f}, {:.0f}) mm".format(
+                            ft_to_mm(point.X), ft_to_mm(point.Y), ft_to_mm(point.Z)))
+                    else:
+                        output.print_md(u"  switch: NONE (no wall found?)")
+                
+                if not point:
+                    skipped += 1
+                    continue
+                
+                level = get_closest_level(doc, point.Z)
+                if not level:
+                    skipped += 1
+                    continue
+                
+                inst = place_switch(doc, symbol, point, rotation, level)
+                if inst:
+                    created += 1
+                else:
+                    skipped += 1
+                continue  # Переходим к следующей комнате
 
             # Для прихожих/коридоров - ищем входную дверь
             if is_corridor:
@@ -256,6 +314,8 @@ def main():
     output.print_md(u"## Результат")
     output.print_md(u"- Выключателей: **{}**".format(created))
     output.print_md(u"- Пропущено: {}".format(skipped))
+
+    report_time_saved(output, 'switches')
 
     if created > 0:
         forms.alert(u"Создано {} выключателей".format(created))

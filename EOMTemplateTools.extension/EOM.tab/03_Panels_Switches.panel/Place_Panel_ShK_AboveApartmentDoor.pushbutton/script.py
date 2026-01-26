@@ -12,6 +12,7 @@ import config_loader
 import link_reader
 import placement_engine
 from utils_revit import alert, ensure_symbol_active, log_exception, set_comments, set_mark, tx
+from time_savings import report_time_saved
 from utils_units import mm_to_ft
 
 
@@ -3277,6 +3278,8 @@ def main():
     if skipped_no_point:
         output.print_md('Пропущено (не удалось получить точку двери): **{0}**'.format(skipped_no_point))
     output.print_md('Комментарий установлен: `{0}`'.format(comment_value))
+
+    report_time_saved(output, 'panels_shk_apartment')
 
     # Debug: open a 3D view zoomed to placed panels
     if created_ids:

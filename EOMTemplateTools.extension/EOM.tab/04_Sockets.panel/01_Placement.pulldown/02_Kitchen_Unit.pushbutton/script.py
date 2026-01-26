@@ -11,6 +11,7 @@ import config_loader
 import link_reader
 import placement_engine
 from utils_revit import alert, log_exception, tx
+from time_savings import report_time_saved
 from utils_units import mm_to_ft
 import socket_utils as su
 import imp
@@ -1258,6 +1259,8 @@ def main():
             ))
         if skipped_details_more[0]:
             output.print_md(u'More skipped rooms: **{0}** (limit kitchen_debug_skipped_rooms_limit)'.format(int(skipped_details_more[0])))
+
+    report_time_saved(output, 'sockets_kitchen_unit')
 
 
 def _legacy():

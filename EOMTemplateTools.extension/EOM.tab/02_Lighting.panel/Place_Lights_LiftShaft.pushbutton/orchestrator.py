@@ -294,14 +294,27 @@ def collect_shafts_from_families(link_doc, rx_inc, rx_exc, limit, min_height_ft=
     return shafts, processed, skipped_name, skipped_bbox, skipped_height
 
 
-def find_link_with_families(host_doc, rx_inc, rx_exc, limit, min_height_ft, exact_names):
-    """Find the first loaded link that contains any of the exact family/type names."""
-    if host_doc is None or not exact_names:
-        return None, None, None, 0, 0, 0, 0
+def iter_loaded_link_docs(doc, parent_transform=None, max_depth=2, visited=None, depth=0):
+    """Yield (link_instance, link_doc, cumulative_transform, is_nested)."""
+    if doc is None:
+        return
+    if visited is None:
+        visited = set()
+
     try:
-        links = link_reader.list_link_instances(host_doc)
+        key = doc.PathName or doc.Title
+    except Exception:
+        key = None
+    if key:
+        if key in visited:
+            return
+        visited.add(key)
+
+    try:
+        links = link_reader.list_link_instances(doc)
     except Exception:
         links = []
+
     for ln in links:
         try:
             if not link_reader.is_link_loaded(ln):
@@ -314,11 +327,54 @@ def find_link_with_families(host_doc, rx_inc, rx_exc, limit, min_height_ft, exac
             ld = None
         if ld is None:
             continue
+        try:
+            t = link_reader.get_total_transform(ln)
+        except Exception:
+            t = DB.Transform.Identity
+        if parent_transform is not None:
+            try:
+                t = parent_transform.Multiply(t)
+            except Exception:
+                pass
+        yield ln, ld, t, (depth > 0)
+        if max_depth and max_depth > 1:
+            for sub in iter_loaded_link_docs(ld, parent_transform=t, max_depth=max_depth - 1, visited=visited, depth=depth + 1):
+                yield sub
+
+
+def find_link_with_families(host_doc, rx_inc, rx_exc, limit, min_height_ft, exact_names, max_depth=2):
+    """Find the first loaded link (or nested link) that contains any of the exact family/type names."""
+    if host_doc is None or not exact_names:
+        return None, None, None, None, 0, 0, 0, 0
+
+    for ln, ld, t, is_nested in iter_loaded_link_docs(host_doc, parent_transform=None, max_depth=max_depth):
         shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = collect_shafts_from_families(
             ld, rx_inc, rx_exc, limit, min_height_ft=min_height_ft, exact_names=exact_names
         )
         if shafts_fam:
-            return ln, ld, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height
+            # If nested link, avoid linked-wall hosting (link_inst not valid in host doc)
+            return (None if is_nested else ln), ld, t, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height
+    return None, None, None, None, 0, 0, 0, 0
+
+
+def find_link_doc_with_families(link_doc, base_transform, rx_inc, rx_exc, limit, min_height_ft, exact_names, max_depth=2):
+    """Search selected link doc and its nested links for families; return doc + transform."""
+    if link_doc is None or not exact_names:
+        return None, None, None, 0, 0, 0, 0
+
+    shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = collect_shafts_from_families(
+        link_doc, rx_inc, rx_exc, limit, min_height_ft=min_height_ft, exact_names=exact_names
+    )
+    if shafts_fam:
+        return link_doc, base_transform, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height
+
+    for ln, ld, t, _ in iter_loaded_link_docs(link_doc, parent_transform=base_transform, max_depth=max_depth):
+        shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = collect_shafts_from_families(
+            ld, rx_inc, rx_exc, limit, min_height_ft=min_height_ft, exact_names=exact_names
+        )
+        if shafts_fam:
+            return ld, t, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height
+
     return None, None, None, 0, 0, 0, 0
 
 
@@ -547,6 +603,7 @@ def run_placement(doc, output, script_module):
     wall_search_mm = float(rules.get('lift_shaft_wall_search_mm', rules.get('host_wall_search_mm', 300)) or 300)
     dedupe_mm = rules.get('lift_shaft_dedupe_radius_mm', rules.get('dedupe_radius_mm', 500))
     enable_existing_dedupe = bool(rules.get('enable_existing_dedupe', False))
+    link_search_depth = int(rules.get('lift_shaft_link_search_depth', 4) or 4)
 
     fams = rules.get('family_type_names', {}) or {}
     type_names = fams.get('light_lift_shaft') or fams.get('light_ceiling_point') or None
@@ -575,26 +632,29 @@ def run_placement(doc, output, script_module):
     min_wall_clear_ft = mm_to_ft(min_wall_clear_mm) or 0.0
     wall_search_ft = mm_to_ft(wall_search_mm) or 0.0
     dedupe_ft = mm_to_ft(dedupe_mm) or 0.0
+    fam_min_height_ft = None if exact_family_names else min_height_ft
 
     # Auto-detect link by exact family names if provided
     link_inst = None
     link_doc = None
+    link_transform = None
     shafts_fam = None
     processed_fam = skipped_fam_name = skipped_fam_bbox = skipped_fam_height = 0
     if exact_family_names:
         # Scan all loaded links without limit to find the target lift families
-        link_inst, link_doc, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = find_link_with_families(
-            doc, rx_inc, rx_exc, None, min_height_ft, exact_family_names
+        link_inst, link_doc, link_transform, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = find_link_with_families(
+            doc, rx_inc, rx_exc, None, fam_min_height_ft, exact_family_names, max_depth=link_search_depth
         )
         # If not found in any link, try current (host) model
         if not shafts_fam:
             try:
                 shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = collect_shafts_from_families(
-                    doc, rx_inc, rx_exc, None, min_height_ft=min_height_ft, exact_names=exact_family_names
+                    doc, rx_inc, rx_exc, None, min_height_ft=fam_min_height_ft, exact_names=exact_family_names
                 )
                 if shafts_fam:
                     link_inst = None
                     link_doc = doc
+                    link_transform = None
             except Exception:
                 pass
 
@@ -613,7 +673,30 @@ def run_placement(doc, output, script_module):
             alert('Не удалось получить документ связи. Проверьте загрузку связи.')
             return
 
-    if link_inst is None:
+        if exact_family_names:
+            base_t = link_reader.get_total_transform(link_inst)
+            # Do not limit when exact list provided; search selected link + nested
+            selected_link_doc = link_doc
+            link_doc_found, link_transform_found, shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = find_link_doc_with_families(
+                link_doc, base_t, rx_inc, rx_exc, None, fam_min_height_ft, exact_family_names, max_depth=link_search_depth
+            )
+            if link_doc_found is not None:
+                link_doc = link_doc_found
+                link_transform = link_transform_found
+                # If family found in nested link, linked-wall hosting is unsafe; disable it
+                try:
+                    if selected_link_doc is not link_doc:
+                        link_inst = None
+                except Exception:
+                    link_inst = None
+
+    if link_transform is not None:
+        t = link_transform
+        try:
+            t_inv = t.Inverse
+        except Exception:
+            t_inv = None
+    elif link_inst is None:
         try:
             t = DB.Transform.Identity
             t_inv = DB.Transform.Identity
@@ -630,7 +713,7 @@ def run_placement(doc, output, script_module):
     # Prefer family-based shaft volumes (GenericModel/Furniture). If found, ignore ShaftOpening.
     if shafts_fam is None:
         shafts_fam, processed_fam, skipped_fam_name, skipped_fam_bbox, skipped_fam_height = collect_shafts_from_families(
-            link_doc, rx_inc, rx_exc, scan_limit_rooms, min_height_ft=min_height_ft, exact_names=exact_family_names
+            link_doc, rx_inc, rx_exc, (None if exact_family_names else scan_limit_rooms), min_height_ft=fam_min_height_ft, exact_names=exact_family_names
         )
     if exact_family_names:
         if not shafts_fam:
@@ -714,7 +797,14 @@ def run_placement(doc, output, script_module):
 
             shaft_min = min(float(host_zmin), float(host_zmax))
             shaft_max = max(float(host_zmin), float(host_zmax))
-            if shaft_max <= shaft_min:
+            if shaft_max <= shaft_min + 1e-6:
+                z_mid = shaft_min
+                pt = DB.XYZ(float(host_c.X), float(host_c.Y), float(z_mid))
+                if dedupe_ft > 0.0 and idx.has_near(pt.X, pt.Y, pt.Z, dedupe_ft):
+                    skipped_dedupe += 1
+                else:
+                    idx.add(pt.X, pt.Y, pt.Z)
+                    points.append((pt, find_nearest_level(doc, z_mid), host_bmin, host_bmax, link_bmin, link_bmax))
                 continue
 
             segments = segment_ranges(levels, shaft_min, shaft_max)

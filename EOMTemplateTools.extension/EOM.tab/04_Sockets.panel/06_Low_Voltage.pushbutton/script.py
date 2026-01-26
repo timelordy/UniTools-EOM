@@ -13,12 +13,14 @@ except Exception:
 
 from pyrevit import revit, script
 from utils_revit import log_exception
+from time_savings import report_time_saved
 import orchestrator
 
 def main():
     doc = revit.doc
     output = script.get_output()
     orchestrator.run(doc, output)
+    report_time_saved(output, 'sockets_low_voltage')
 
 if __name__ == '__main__':
     try:

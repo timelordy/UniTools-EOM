@@ -1,58 +1,59 @@
 {
-  "project": "Low Voltage Sockets",
-  "branchName": "ralph/low-voltage-sockets",
-  "description": "Add logic for Intercom (1400mm near intercom) and Router (near LV panel) sockets.",
+  "project": "AC Socket Placement Plugin Rewrite",
+  "branchName": "ralph/ac-socket-rewrite",
+  "description": "Rewrite of the 04_AC.pushbutton plugin from scratch. The plugin places sockets for air conditioners in rooms adjacent to external AC baskets.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Analyze Existing Low Voltage Script",
-      "description": "Read and understand the current implementation of 06_Low_Voltage.pushbutton.",
+      "title": "Clean and Setup Plugin Structure",
+      "description": "Delete all existing files in '04_AC.pushbutton' and create a fresh plugin structure (bundle.yaml, script.py, lib folder).",
       "acceptanceCriteria": [
-        "Code analysis completed"
+        "Old files deleted.",
+        "New bundle.yaml created.",
+        "Basic script.py created with imports."
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Code analysis completed."
+      "notes": "Deleted old files and created bundle.yaml and script.py."
     },
     {
       "id": "US-002",
-      "title": "Update Constants and Keywords",
-      "description": "Add more specific keywords for Intercom and Router/LV Panel search. Ensure heights are correct.",
+      "title": "Implement AC Basket Collector",
+      "description": "Create logic to find all AC outdoor unit baskets in the model. Need to identify the correct Family/Type names for baskets.",
       "acceptanceCriteria": [
-        "Update INTERCOM_KEYWORDS",
-        "Update CABINET_KEYWORDS",
-        "Ensure DEFAULT_INTERCOM_HEIGHT_MM is 1400",
-        "Add ROUTER_OFFSET_MM (e.g. 200mm)"
+        "Function to collect AC Basket elements.",
+        "Filter by Category (likely Mechanical Equipment or Generic Models) and Name keywords."
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Updated constants.py."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Refine Intercom Placement Logic",
-      "description": "Ensure intercom socket is placed 1400mm high and offset from the intercom device itself.",
+      "title": "Implement Adjacency Logic (Basket -> Room)",
+      "description": "For each basket, find the adjacent internal room. Since baskets are outside, we need to find the room on the other side of the wall or the closest room.",
       "acceptanceCriteria": [
-        "Use 1400mm height for intercom socket",
-        "Implement offset logic (e.g. 200mm to side)",
-        "Search for 'Domofon' family instances specifically if possible, or fallback to text"
+        "Identify the wall the basket is attached to (Host).",
+        "Get the room connected to that wall.",
+        "Fallback: Spatial proximity search if not hosted."
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Implemented in orchestrator.py. Added fallback to entrance door handle in Hallways."
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Refine Router/LV Panel Placement Logic",
-      "description": "Place router socket near LV panel (SS) or Junction Box in Hallway.",
+      "title": "Implement Socket Placement Logic",
+      "description": "Place one socket in the identified room. Calculate Z = (Room Ceiling Height - 300mm).",
       "acceptanceCriteria": [
-        "Filter rooms by 'Prihozhaya' / 'Hallway' name for Router placement",
-        "Find LV Panel (Щит СС) or Junction Box (Коробка СС)",
-        "Place socket nearby (e.g. 200mm offset, 300mm height or match panel height)"
+        "Determine Room Ceiling Height (Volume/BoundingBox/Parameter).",
+        "Calculate Z = Height - 300mm.",
+        "Place FamilyInstance (Socket) at a valid location on the wall (aligned with basket if possible, or center of wall).",
+        "Ensure 1 socket per room."
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "Implemented in orchestrator.py. Places socket near found Cabinet/Panel points."
+      "passes": false,
+      "notes": ""
     }
   ]
 }

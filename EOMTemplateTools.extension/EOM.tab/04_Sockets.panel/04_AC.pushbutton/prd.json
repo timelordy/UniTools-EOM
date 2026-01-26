@@ -1,0 +1,31 @@
+{
+  "project": "AC Socket Placement v3",
+  "branchName": "ralph/rewrite-ac-logic",
+  "description": "Rewrite AC socket placement algorithm to strictly place sockets on perpendicular (side) walls adjacent to the facade wall where the AC unit is located.",
+  "userStories": [
+    {
+      "id": "US-01",
+      "title": "Clean Script & Infrastructure",
+      "description": "Create a new script.py structure, keeping necessary boilerplate but removing old logic.",
+      "acceptanceCriteria": ["script.py is clean", "Imports work"],
+      "priority": 1,
+      "passes": false
+    },
+    {
+      "id": "US-02",
+      "title": "Geometry Logic: Find Side Walls",
+      "description": "Implement logic: From AC basket -> Find Room -> Find Facade Wall -> Find Perpendicular Side Walls -> Choose nearest Corner.",
+      "acceptanceCriteria": ["Identifies correct side wall", "Calculates point 200mm from corner"],
+      "priority": 2,
+      "passes": false
+    },
+    {
+      "id": "US-03",
+      "title": "Placement & UI",
+      "description": "Integrate placement logic (creating FamilyInstance) and UI feedback.",
+      "acceptanceCriteria": ["Sockets appear in Revit", "Report shows success"],
+      "priority": 3,
+      "passes": false
+    }
+  ]
+}

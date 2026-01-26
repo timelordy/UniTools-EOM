@@ -18,6 +18,7 @@ from adapters import (
     get_door_info,
     get_room_name,
     get_switch_symbol,
+    is_entrance_door,
     place_switch,
 )
 from constants import (
@@ -118,12 +119,33 @@ def main():
                 skipped += 1
                 continue
 
-            # Пропускаем прихожие/коридоры - там нет выключателей
+            # Для прихожих/коридоров - ищем входную дверь
             if is_corridor:
-                continue
-
-            best_door = None
-            best_info = None
+                entrance_door = None
+                entrance_info = None
+                
+                for door, info in door_list:
+                    if is_entrance_door(info):
+                        entrance_door = door
+                        entrance_info = info
+                        break
+                
+                if not entrance_door:
+                    # Входная дверь не найдена - пропускаем
+                    skipped += 1
+                    continue
+                
+                # Ставим выключатель около входной двери (внутри прихожей)
+                best_door = entrance_door
+                best_info = entrance_info
+                other_room = None  # Снаружи - не комната
+                is_wet = False
+                is_two_gang = False  # В прихожей 1-клавишный
+                place_inside = True  # Внутри прихожей
+            else:
+                # Для обычных комнат - ищем дверь в коридор
+                best_door = None
+                best_info = None
             other_room = None
 
             for door, info in door_list:

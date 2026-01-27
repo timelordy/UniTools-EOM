@@ -1,4 +1,4 @@
-﻿{
+{
     "wet_raycast_slack_mm":  400,
     "kitchen_validate_match_tol_mm":  2000,
     "ac_perpendicular_tolerance":  0.29999999999999999,
@@ -471,5 +471,17 @@
                                                "lobby",
                                                "stair"
                                            ],
-    "switch_height_mm":  900
+    "switch_height_mm":  900,
+    "storage_room_name_patterns":  [
+                                        "клад",
+                                        "хранил",
+                                        "кладов",
+                                        "storage"
+                                    ],
+    "storage_panel_height_mm":  1700,
+    "storage_switch_height_mm":  900,
+    "storage_light_height_mm":  2700,
+    "storage_validate_match_tol_mm":  2000,
+    "storage_validate_height_tol_mm":  20,
+    "storage_validate_wall_dist_mm":  100
 }

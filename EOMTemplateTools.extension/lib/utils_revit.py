@@ -16,18 +16,31 @@ def get_logger():
     return script.get_logger()
 
 
+def _safe_log(logger_method, msg):
+    try:
+        logger_method(msg)
+    except UnicodeEncodeError:
+        try:
+            # Fallback to repr which escapes non-ascii
+            logger_method(repr(msg))
+        except Exception:
+            logger_method("<Log message encoding failed>")
+    except Exception:
+        pass
+
+
 def alert(msg, title='EOM Template Tools', warn_icon=True):
     try:
         forms.alert(msg, title=title, warn_icon=warn_icon)
     except Exception:
         # As a last resort if UI is unavailable
-        get_logger().warning(msg)
+        _safe_log(get_logger().warning, msg)
 
 
 def log_exception(prefix='Error'):
     logger = get_logger()
-    logger.error(prefix)
-    logger.error(traceback.format_exc())
+    _safe_log(logger.error, prefix)
+    _safe_log(logger.error, traceback.format_exc())
 
 
 def trace(msg, filename='EOMTemplateTools.trace.log'):

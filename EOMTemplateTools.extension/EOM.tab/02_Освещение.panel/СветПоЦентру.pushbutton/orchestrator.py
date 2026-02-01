@@ -8,6 +8,14 @@ import link_reader
 import placement_engine
 import adapters
 import domain
+try:
+    import socket_utils as su
+except ImportError:
+    # Fallback to lib in extension if path setup is weird
+    import sys, os
+    sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'lib'))
+    import socket_utils as su
+
 from domain import (
     room_name,
     is_excluded_room,
@@ -32,22 +40,16 @@ def run_placement(doc, uidoc, output, script_module):
 
     trace('Place_Lights_RoomCenters: start')
 
-    rules = adapters.get_rules()
+    def _build_result(placed, skipped_ext, skipped_dup):
+        skipped_total = skipped_ext + skipped_dup
+        return {
+            'placed': placed,
+            'skipped': skipped_total,
+            'skipped_ext': skipped_ext,
+            'skipped_dup': skipped_dup,
+        }
 
-    # DEBUG: List all lighting fixture symbols
-    sym_col = DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_LightingFixtures).WhereElementIsElementType()
-    print(u'--- AVAILABLE LIGHTING FIXTURE SYMBOLS ---')
-    for s in sym_col:
-        try:
-            sym_name = s.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM).AsString() or str(s.Id.IntegerValue)
-        except:
-            sym_name = str(s.Id.IntegerValue)
-        try:
-            fam_name = s.get_Parameter(DB.BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM).AsString() or u""
-        except:
-            fam_name = u""
-        print(u'Name: {0} | Family: {1}'.format(sym_name, fam_name))
-    print(u'------------------------------------------')
+    rules = adapters.get_rules()
 
     # Defaults
     comment_tag = rules.get('comment_tag', 'AUTO_EOM')
@@ -58,22 +60,43 @@ def run_placement(doc, uidoc, output, script_module):
     link_inst = adapters.select_link_instance_ru(doc, title='Выберите связь АР')
     if link_inst is None:
         output.print_md('**Отменено.**')
-        return
+        return _build_result(0, 0, 0)
     if not link_reader.is_link_loaded(link_inst):
         alert('Выбранная связь не загружена. Загрузите её в «Управление связями» и повторите.')
-        return
+        return _build_result(0, 0, 0)
 
     link_doc = link_reader.get_link_doc(link_inst)
     if link_doc is None:
         alert('Не удалось получить доступ к документу связи. Убедитесь, что связь загружена.')
-        return
+        return _build_result(0, 0, 0)
+
+    link_transform = link_reader.get_total_transform(link_inst)
 
     # Levels
     trace('Select levels UI')
     selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни для обработки')
     if not selected_levels:
         output.print_md('**Отменено (уровни не выбраны).**')
-        return
+        return _build_result(0, 0, 0)
+
+    def _norm_level_name(name):
+        try:
+            return (name or '').strip().lower()
+        except Exception:
+            return ''
+
+    # Host doc levels indexed by name (prefer mapping by AR link level name).
+    host_levels_by_name = {}
+    try:
+        for hl in DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements():
+            try:
+                key = _norm_level_name(getattr(hl, 'Name', None))
+                if key and key not in host_levels_by_name:
+                    host_levels_by_name[key] = hl
+            except Exception:
+                pass
+    except Exception:
+        host_levels_by_name = {}
 
     # Resolve families
     fam_names = rules.get('family_type_names', {}) or {}
@@ -84,9 +107,23 @@ def run_placement(doc, uidoc, output, script_module):
     if not fam_wall:
         # Look for something that looks like a wall light
         candidates = ['Бра', 'Настен', 'Wall', 'Указатель', 'Выход']
+        exclude_candidates = [
+            'розетк', 'socket', 'выключатель', 'switch', 'рамка', 'frame', 
+            'коробка', 'box', 'control', 'датчик', 'sensor'
+        ]
+        
         sym_col = DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_LightingFixtures).WhereElementIsElementType()
         for s in sym_col:
             fn = s.FamilyName
+            try:
+                fn_lower = (fn or "").lower()
+            except:
+                fn_lower = ""
+            
+            # Check exclusions
+            if any(exc in fn_lower for exc in exclude_candidates):
+                continue
+
             if any(c in fn for c in candidates):
                 fam_wall = fn
                 output.print_md('**Авто-выбор настенного светильника:** `{0}`'.format(fam_wall))
@@ -97,8 +134,23 @@ def run_placement(doc, uidoc, output, script_module):
     if not sym_ceiling:
         # Fallback: pick first valid lighting fixture
         col = DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_LightingFixtures).WhereElementIsElementType()
+        
+        exclude_candidates = [
+            'розетк', 'socket', 'выключатель', 'switch', 'рамка', 'frame', 
+            'коробка', 'box', 'control', 'датчик', 'sensor'
+        ]
+
         for e in col:
             if isinstance(e, DB.FamilySymbol):
+                fn = e.FamilyName
+                try:
+                    fn_lower = (fn or "").lower()
+                except:
+                    fn_lower = ""
+                
+                if any(exc in fn_lower for exc in exclude_candidates):
+                    continue
+
                 sym_ceiling = e
                 break
 
@@ -109,7 +161,7 @@ def run_placement(doc, uidoc, output, script_module):
 
     if not sym_ceiling:
         alert('Не найдено семейство светильника. Загрузите семейство и повторите.')
-        return
+        return _build_result(0, 0, 0)
 
     # Activate symbols
     with tx('Activate Symbols', doc=doc):
@@ -120,8 +172,6 @@ def run_placement(doc, uidoc, output, script_module):
     # Pre-collect ALL existing lights (not just current type) to prevent overlap with anything
     existing_centers = adapters.collect_existing_lights_centers(doc, tolerance_ft=1.5)
 
-    link_transform = link_inst.GetTotalTransform()
-
     # Collect rooms
     rooms_raw = []
     for lvl in selected_levels:
@@ -130,7 +180,7 @@ def run_placement(doc, uidoc, output, script_module):
 
     if not rooms_raw:
         alert('В выбранных уровнях не найдено помещений (Rooms).')
-        return
+        return _build_result(0, 0, 0)
 
     # Deduplicate rooms (handle Design Options or bad links)
     rooms = filter_duplicate_rooms(rooms_raw)
@@ -144,6 +194,9 @@ def run_placement(doc, uidoc, output, script_module):
     debug_view = None
 
     # Main Transaction with SWALLOW WARNINGS
+    count = 0
+    skipped_ext = 0
+    skipped_dup = 0
     with tx('Place Room Center Lights', doc=doc, swallow_warnings=True):
         count = 0
         skipped_ext = 0
@@ -151,8 +204,10 @@ def run_placement(doc, uidoc, output, script_module):
 
         # Try to prepare debug view for the first selected level
         try:
-            first_r_level = link_doc.GetElement(selected_levels[0].Id)
-            first_host_level = find_nearest_level(doc, first_r_level.Elevation + link_transform.Origin.Z)
+            first_r_level = selected_levels[0]
+            first_host_level = host_levels_by_name.get(_norm_level_name(getattr(first_r_level, 'Name', None)))
+            if not first_host_level:
+                first_host_level = find_nearest_level(doc, first_r_level.Elevation + link_transform.Origin.Z)
             if first_host_level:
                 debug_view = adapters.get_or_create_debug_view(doc, first_host_level.Id)
         except Exception:
@@ -183,13 +238,11 @@ def run_placement(doc, uidoc, output, script_module):
                 if pt_sink:
                     target_pts = [pt_sink]
                     placement_z_mode = 'absolute_z_link'
-                    print(u'DEBUG: Bathroom "{0}" -> SINK found'.format(room_name(r)))
                 else:
                     # Fallback to Center (Ceiling)
                     target_pts = get_room_centers_multi(r)
                     target_symbol = sym_ceiling
                     placement_z_mode = 'ceiling'
-                    print(u'DEBUG: Bathroom "{0}" -> No sink, fallback to CENTER'.format(room_name(r)))
 
             elif is_toilet(r):
                 # Toilet Rule:
@@ -208,21 +261,12 @@ def run_placement(doc, uidoc, output, script_module):
                         target_pts = [pt]
                         found_door_pt = True
                         placement_z_mode = 'door_relative'
-                        # Enhanced debug: show door ID and location
-                        try:
-                            door_loc = door.Location.Point if door.Location else None
-                            door_z = door_loc.Z if door_loc else 'N/A'
-                            print(u'DEBUG: Toilet "{0}" -> Door ID {1}, DoorZ={2:.2f}, LightZ={3:.2f}'.format(
-                                room_name(r), door.Id.IntegerValue, door_z, pt.Z))
-                        except:
-                            print(u'DEBUG: Toilet "{0}" -> Door found'.format(room_name(r)))
                 
                 if not found_door_pt:
                     # Fallback to Center (Ceiling)
                     target_pts = get_room_centers_multi(r)
                     target_symbol = sym_ceiling
                     placement_z_mode = 'ceiling'
-                    print(u'DEBUG: Toilet "{0}" -> No door/calc failed, fallback to CENTER'.format(room_name(r)))
 
             else:
                 # Strategy: Standard (Center or Corridor)
@@ -241,7 +285,10 @@ def run_placement(doc, uidoc, output, script_module):
                     r_level_id = r.LevelId
                     r_level = link_doc.GetElement(r_level_id)
                     r_elev = r_level.Elevation
-                    host_level = find_nearest_level(doc, r_elev + link_transform.Origin.Z)
+
+                    host_level = host_levels_by_name.get(_norm_level_name(getattr(r_level, 'Name', None)))
+                    if not host_level:
+                        host_level = find_nearest_level(doc, r_elev + link_transform.Origin.Z)
                 except Exception:
                     host_level = None
 
@@ -254,7 +301,8 @@ def run_placement(doc, uidoc, output, script_module):
                     # p_host is transformed (includes link Z offset).
                     z = p_host.Z 
                 else:
-                    z = host_level.Elevation + ceiling_height_ft
+                    # Use AR link level elevation (transformed) as source of truth.
+                    z = (r_elev + link_transform.Origin.Z) + ceiling_height_ft
 
                 insert_point = DB.XYZ(p_host.X, p_host.Y, z)
 
@@ -271,22 +319,19 @@ def run_placement(doc, uidoc, output, script_module):
                     # Add to existing list to prevent duplicates within same run
                     existing_centers.append(insert_point)
                     count += 1
-                    print(u'DEBUG: Created ID {0} at {1}'.format(inst.Id, insert_point))
                 except Exception as e1:
                     # Plan B: Try using ceiling symbol (usually unhosted) if wall symbol failed (e.g. wall-hosted)
                     if target_symbol.Id != sym_ceiling.Id:
-                         try:
-                             print(u'DEBUG: Failed with wall symbol. Retrying with ceiling symbol...')
-                             inst = doc.Create.NewFamilyInstance(insert_point, sym_ceiling, host_level, DB.Structure.StructuralType.NonStructural)
-                             set_comments(inst, comment_value)
-                             placed_ids.append(inst.Id)
-                             existing_centers.append(insert_point)
-                             count += 1
-                             print(u'DEBUG: Created ID {0} (Plan B) at {1}'.format(inst.Id, insert_point))
-                         except Exception as e2:
-                             print(u'DEBUG: ERROR creating instance (Plan B) at {0}: {1}'.format(insert_point, str(e2)))
-                    else:
-                        print(u'DEBUG: ERROR creating instance at {0}: {1}'.format(insert_point, str(e1)))
+                        try:
+                            inst = doc.Create.NewFamilyInstance(insert_point, sym_ceiling, host_level, DB.Structure.StructuralType.NonStructural)
+                            set_comments(inst, comment_value)
+                            placed_ids.append(inst.Id)
+                            existing_centers.append(insert_point)
+                            count += 1
+                            continue
+                        except Exception:
+                            pass
+                    print(u'DEBUG: ERROR creating instance at {0}: {1}'.format(insert_point, str(e1)))
                     continue
 
         output.print_md('**Готово.** Размещено светильников: {0}'.format(count))
@@ -307,3 +352,5 @@ def run_placement(doc, uidoc, output, script_module):
                     uidoc.ShowElements(net_ids)
         except Exception:
             pass
+
+    return _build_result(count, skipped_ext, skipped_dup)

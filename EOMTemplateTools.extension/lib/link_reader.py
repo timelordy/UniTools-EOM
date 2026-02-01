@@ -5,6 +5,7 @@ import math
 
 from pyrevit import DB
 from pyrevit import forms
+import magic_context
 
 
 def list_link_instances(doc):
@@ -78,6 +79,10 @@ def list_levels(doc):
 
 
 def select_level(doc, title='Select Level', allow_none=True):
+    # Magic Button check
+    if magic_context.IS_RUNNING and magic_context.SELECTED_LEVELS:
+        return magic_context.SELECTED_LEVELS[0]
+
     lvls = list_levels(doc)
     if not lvls:
         return None
@@ -108,6 +113,10 @@ def select_level(doc, title='Select Level', allow_none=True):
 
 def select_levels_multi(doc, title='Select Levels (Multi)', default_all=True):
     """Select multiple levels from doc using SelectFromList."""
+    # Magic Button check
+    if magic_context.IS_RUNNING and magic_context.SELECTED_LEVELS:
+        return list(magic_context.SELECTED_LEVELS)
+
     lvls = list_levels(doc)
     if not lvls:
         return []
@@ -115,36 +124,49 @@ def select_levels_multi(doc, title='Select Levels (Multi)', default_all=True):
     items = []
     for l in lvls:
         try:
-            items.append((u'{0}  (elev={1:.2f}ft)  [id={2}]'.format(l.Name, float(l.Elevation), int(l.Id.IntegerValue)), l))
+            items.append((u'{0}  (elev={1:.2f}ft)'.format(l.Name, float(l.Elevation)), l))
         except Exception:
-            try:
-                items.append((u'{0}  [id={1}]'.format(getattr(l, 'Name', 'Level'), int(l.Id.IntegerValue)), l))
-            except Exception:
-                items.append((u'{0}'.format(getattr(l, 'Name', 'Level')), l))
+            items.append((u'{0}'.format(getattr(l, 'Name', 'Level')), l))
 
-    # IMPORTANT: Pass strings to the UI. Passing Revit API elements (especially from link docs)
-    # into WPF bindings can cause hard Revit crashes on some projects.
     items = sorted(items, key=lambda x: x[0].lower())
-    labels = [x[0] for x in items]
 
-    picked_labels = forms.SelectFromList.show(
-        labels,
+    picked = forms.SelectFromList.show(
+        [x[0] for x in items],
         title=title,
         multiselect=True,
         button_name='Select'
     )
-    if not picked_labels:
+
+    if not picked:
         return []
 
-    lbl2lvl = {lbl: lvl for (lbl, lvl) in items}
-    out = []
-    for lbl in picked_labels:
-        lvl = lbl2lvl.get(lbl)
-        if lvl is not None:
-            out.append(lvl)
+    selected_levels = []
+    for p in picked:
+        for lbl, lvl in items:
+            if lbl == p:
+                selected_levels.append(lvl)
+                break
+    
+    return selected_levels
 
-    # If user somehow selected nothing but default_all requested, keep prior behavior (empty).
-    return out
+
+def select_link_instance_auto(host_doc):
+    """Auto-select the first loaded link instance, or first available if none loaded."""
+    # Magic Button check
+    if magic_context.IS_RUNNING and magic_context.SELECTED_LINK:
+        return magic_context.SELECTED_LINK
+
+    links = list_link_instances(host_doc)
+    if not links:
+        return None
+    
+    # Prefer loaded links
+    loaded = [ln for ln in links if is_link_loaded(ln)]
+    if loaded:
+        return loaded[0]
+        
+    # Fallback to first link
+    return links[0]
 
 
 def iter_elements_by_category(doc, bic, limit=None, level_id=None):

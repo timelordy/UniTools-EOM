@@ -149,15 +149,9 @@ def _collect_floor_plans(doc):
 def _select_floor_plans(doc):
     plans = _collect_floor_plans(doc)
     if not plans:
-        forms.alert(u"РџР»Р°РЅС‹ СЌС‚Р°Р¶РµР№ РЅРµ РЅР°Р№РґРµРЅС‹.", title=TITLE, warn_icon=True)
+        forms.alert(u"Планы этажей не найдены.", title=TITLE, warn_icon=True)
         return []
-    return forms.SelectFromList.show(
-        plans,
-        name_attr="Name",
-        multiselect=True,
-        title=u"Р’С‹Р±РѕСЂ РїР»Р°РЅРѕРІ СЌС‚Р°Р¶РµР№",
-        button_name=u"РџСЂРѕРґРѕР»Р¶РёС‚СЊ",
-    ) or []
+    return plans
 
 
 def _show_settings_dialog(settings):

@@ -1014,3 +1014,15 @@ def run_placement(doc, output, script_module):
 
         if go_debug:
             open_debug_plans(revit.uidoc, doc, created_elems)
+
+    try:
+        shafts_total = len(shafts or [])
+    except Exception:
+        shafts_total = 0
+
+    return {
+        'placed': int(created_count or 0),
+        'shafts': int(shafts_total or 0),
+        'skipped': int(skipped_place or 0),
+        'skipped_no_wall': int(skipped_no_wall or 0),
+    }

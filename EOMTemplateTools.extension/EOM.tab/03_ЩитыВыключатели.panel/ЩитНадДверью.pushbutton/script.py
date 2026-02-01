@@ -14,6 +14,12 @@ import placement_engine
 from utils_revit import alert, ensure_symbol_active, log_exception, set_comments, set_mark, tx
 from time_savings import report_time_saved
 from utils_units import mm_to_ft
+try:
+    import socket_utils as su
+except ImportError:
+    import sys, os
+    sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'lib'))
+    import socket_utils as su
 
 
 doc = revit.doc
@@ -1591,42 +1597,127 @@ def _score_room_apartment(room):
 
 def _is_confirmed_apartment_door(door, link_doc):
     """Check if door leads TO or FROM a confirmed apartment room (avoids MOP-MOP doors)."""
-    # Try to find phase from door if possible, or fallback to doc phases
-    phases = []
+    # 1. Try specific created phase (most accurate)
+    phases_to_try = []
     try:
-        # Getting phase from element is not direct in API < 2024 usually, but we can try
-        # to get CreatedPhaseId
         ph_id = getattr(door, 'CreatedPhaseId', DB.ElementId.InvalidElementId)
         if ph_id != DB.ElementId.InvalidElementId:
             ph = link_doc.GetElement(ph_id)
-            if ph: phases.append(ph)
+            if ph: phases_to_try.append(ph)
     except: pass
     
-    if not phases:
-        try:
-            phases = [list(link_doc.Phases)[-1]]
-        except Exception:
-            phases = []
+    # 2. Add Last phase (common fallback)
+    try:
+        last_ph = list(link_doc.Phases)[-1]
+        if last_ph not in phases_to_try:
+            phases_to_try.append(last_ph)
+    except Exception:
+        pass
+
+    # 3. Add ALL phases (last resort)
+    try:
+        all_phases = list(link_doc.Phases)
+        for p in all_phases:
+            if p not in phases_to_try:
+                phases_to_try.append(p)
+    except Exception:
+        pass
 
     has_apt = False
     has_outside = False
 
-    for r in _iter_from_to_rooms(door, phases):
-        sc = _score_room_apartment(r)
-        if sc > 0: has_apt = True
-        if sc < -50: has_outside = True
+    # Check phases in order of likelihood
+    # If we find a valid room configuration in ANY phase, we accept it.
+    for phase_set in [phases_to_try]: 
+        # actually iterate individual phases, but we want to break early if we find a match?
+        # A door exists in one phase timeline. Usually FromRoom/ToRoom methods take a single phase.
+        pass
 
-    # Must have at least one apartment-side room, and ideally one outside room (entrance).
-    # If both rooms are apartment (internal door), we skip? Or is it okay?
-    # Typically ShK is at entrance. Entrance connects Apt <-> Corridor.
-    # So we want (Apt AND Outside).
+    # Different strategy: check 'FromRoom'/'ToRoom' for the *specific* list of phases 
+    # and accumulate evidence.
+    
+    for ph in phases_to_try:
+        # Check this specific phase
+        # Note: _iter_from_to_rooms yields rooms for the given list of phases
+        found_rooms = list(_iter_from_to_rooms(door, [ph]))
+        if not found_rooms:
+            continue
+            
+        this_phase_apt = False
+        this_phase_out = False
+        
+        for r in found_rooms:
+            sc = _score_room_apartment(r)
+            if sc > 0: this_phase_apt = True
+            if sc < -50: this_phase_out = True
+        
+        # Accumulate global flags (if it's an apartment door in ANY valid phase, count it)
+        if this_phase_apt: has_apt = True
+        if this_phase_out: has_outside = True
+        
+        # Optimization: if we found both, we are sure.
+        if has_apt and has_outside:
+             return True
+
+    # If we noticed it's an apartment entrance in at least one phase
     if has_apt and has_outside:
         return True
     
-    # If we only see apartment side (maybe facing outside is unresolved), accept weakly?
-    # If we see only outside side, definitely reject.
+    # Weak check: if we see apartment side but can't resolve outside (e.g. unplaced room), accept
     if has_apt and (not has_outside):
-        return True # Potentially internal or unresolvable outside
+        return True 
+
+    # 4. Final Fallback: Spatial Check (Geometric) with Offset
+    # If API properties failed, try to spatially find a room near the door center.
+    try:
+        if not (has_apt or has_outside): # only if completely failed
+            p_door = None
+            facing = None
+            try:
+                loc = door.Location
+                if loc and hasattr(loc, 'Point'):
+                    p_door = loc.Point
+                if hasattr(door, 'FacingOrientation'):
+                    facing = door.FacingOrientation
+            except: pass
+            
+            check_points = []
+            if p_door:
+                # Lift point by 1 ft (~300mm) to avoid being below room volume (e.g. floor finishes)
+                p_check = DB.XYZ(p_door.X, p_door.Y, p_door.Z + 1.0)
+                
+                # 1. Center point (might be in wall)
+                check_points.append(p_check)
+                
+                # 2. Offset points (front/back) to get out of the wall
+                if facing:
+                    try:
+                        # Offset by ~400mm (1.3 ft)
+                        off_vec = facing * 1.3
+                        check_points.append(p_check + off_vec)
+                        check_points.append(p_check - off_vec)
+                    except: pass
+            
+            found_apt_spatial = False
+            found_out_spatial = False
+            
+            for pt in check_points:
+                # Check IsPointInRoom for the phases we collected
+                for ph in phases_to_try:
+                    try:
+                        # GetRoomAtPoint returns the room enclosing the point
+                        r_at_point = link_doc.GetRoomAtPoint(pt, ph)
+                        if r_at_point and r_at_point.Location:
+                            sc = _score_room_apartment(r_at_point)
+                            if sc > 0: found_apt_spatial = True
+                            if sc < -50: found_out_spatial = True
+                    except: 
+                        continue
+            
+            if found_apt_spatial:
+                return True
+    except:
+        pass
         
     return False
 
@@ -2700,6 +2791,23 @@ def main():
         alert('Не удалось получить доступ к документу связи. Убедитесь, что связь загружена.')
         return
 
+    output.print_md('Выбранная связь: `{0}`'.format(link_inst.Name))
+    
+    # Pre-check: does the link have rooms?
+    try:
+        all_rooms = link_reader.get_rooms(link_doc)
+        room_count = len(all_rooms)
+    except Exception:
+        room_count = 0
+    
+    if room_count == 0:
+        alert('В выбранной связи АР не найдено ни одного помещения (Rooms).\n\n'
+              'Скрипт использует помещения для определения входных дверей квартир.\n'
+              'Убедитесь, что в связи размещены помещения, или выберите другой файл.')
+        return
+        
+    output.print_md('Найдено помещений в связи: **{0}**'.format(room_count))
+
     rules = config_loader.load_rules()
     comment_tag = rules.get('comment_tag', 'AUTO_EOM')
     offset_mm = rules.get('panel_above_door_offset_mm', 300)
@@ -2838,7 +2946,53 @@ def main():
                     continue
                 
                 # Strict apartment check
-                if not _is_confirmed_apartment_door(d, link_doc):
+                is_apt = _is_confirmed_apartment_door(d, link_doc)
+                if not is_apt:
+                    # VERBOSE DIAGNOSTIC FOR FIRST 3 FAILURES
+                    if len(debug_log) < 3:
+                        output.print_md('---')
+                        output.print_md('**DEBUG DIAGNOSTIC for: {0} (Id: {1})**'.format(tname, d.Id))
+                        
+                        # 1. Phases
+                        all_phases = list(link_doc.Phases)
+                        output.print_md('Link Phases: ' + ', '.join(['{0} (Id: {1})'.format(p.Name, p.Id) for p in all_phases]))
+                        
+                        # 2. Geometry
+                        try:
+                            loc = d.Location
+                            if loc and hasattr(loc, 'Point'):
+                                pt = loc.Point
+                                output.print_md('Door Point: X={0:.2f}, Y={1:.2f}, Z={2:.2f}'.format(pt.X, pt.Y, pt.Z))
+                                
+                                # Probe points
+                                probes = []
+                                # Center + 1ft up
+                                probes.append(('Center+1ft', DB.XYZ(pt.X, pt.Y, pt.Z + 1.0)))
+                                # Offsets
+                                if hasattr(d, 'FacingOrientation'):
+                                    f = d.FacingOrientation
+                                    off = f * 1.3
+                                    probes.append(('Front+1ft', DB.XYZ(pt.X + off.X, pt.Y + off.Y, pt.Z + 1.0)))
+                                    probes.append(('Back+1ft', DB.XYZ(pt.X - off.X, pt.Y - off.Y, pt.Z + 1.0)))
+                                
+                                # Check each probe against ALL phases
+                                for pname, ppt in probes:
+                                    output.print_md('  Probe **{0}** ({1:.2f}, {2:.2f}, {3:.2f}):'.format(pname, ppt.X, ppt.Y, ppt.Z))
+                                    found_any = False
+                                    for ph in all_phases:
+                                        r = link_doc.GetRoomAtPoint(ppt, ph)
+                                        if r:
+                                            found_any = True
+                                            sc = _score_room_apartment(r)
+                                            output.print_md('    - Phase "{0}": Room "{1}" (Id: {2}, Score: {3})'.format(ph.Name, r.Name, r.Id, sc))
+                                    if not found_any:
+                                        output.print_md('    - No rooms found in any phase.')
+                            else:
+                                output.print_md('Door has no Location Point.')
+                        except Exception as ex:
+                            output.print_md('Diagnostic Error: {0}'.format(ex))
+                        output.print_md('---')
+
                     if len(debug_log) < 15: 
                         # Get room names for debug
                         try:
@@ -2863,10 +3017,11 @@ def main():
                                 
                             n1 = getattr(r1, 'Name', 'None')
                             n2 = getattr(r2, 'Name', 'None')
-                            debug_log.append(u"Skip '{0}': rooms {1}/{2} not Apt+Out".format(tname, n1, n2))
+                            debug_log.append(u"Warn '{0}': rooms {1}/{2} not Apt+Out (Phase: {3}) -> ACCEPTING by name property".format(tname, n1, n2, ph.Name if ph else '?'))
                         except:
-                            debug_log.append(u"Skip '{0}': rooms check failed".format(tname))
-                    continue
+                            debug_log.append(u"Warn '{0}': rooms check failed -> ACCEPTING by name property".format(tname))
+                    # Fallback: Accept valid steel doors even if room topology is unclear (User request)
+                    pass
                 
                 target_doors.append(d)
             except Exception:
@@ -2890,7 +3045,8 @@ def main():
         except Exception:
             sample = []
 
-        msg = 'Автоматически не найдено ни одной стальной двери в выбранной связи АР.\n\n'
+        msg = 'Автоматически не найдено ни одной стальной двери в выбранной связи АР.\n'
+        msg += 'Сканируемая связь: {0}\n\n'.format(link_inst.Name)
         msg += 'Ожидается, что в названии семейства/типа двери есть одно из: {0}\n\n'.format(', '.join([str(x) for x in STEEL_FAMILY_KEYWORDS]))
         
         if debug_log:
@@ -2902,7 +3058,6 @@ def main():
         forms.alert(msg, title='Размещение щитов ШК', warn_icon=True)
         return
 
-    output.print_md('Выбранная связь: `{0}`'.format(link_inst.Name))
     output.print_md('Режим выбора дверей: **{0}**'.format(reason))
     try:
         output.print_md('Тип щита (автовыбор): `{0}`'.format(placement_engine.format_family_type(symbol)))
@@ -3370,6 +3525,22 @@ def main():
                 pass
 
     logger.info('ШК создано=%s пропущено_дубли=%s пропущено_без_точки=%s', created, skipped_dedupe, skipped_no_point)
+    report_time_saved(output, 'panel_door', created)
+    try:
+        from time_savings import calculate_time_saved, calculate_time_saved_range
+        minutes = calculate_time_saved('panel_door', created)
+        minutes_min, minutes_max = calculate_time_saved_range('panel_door', created)
+        global EOM_HUB_RESULT
+        cnt_skip = (skipped_dedupe or 0) + (skipped_no_point or 0)
+        stats = {'total': created, 'processed': created, 'skipped': cnt_skip, 'errors': 0}
+        EOM_HUB_RESULT = {
+            'stats': stats,
+            'time_saved_minutes': minutes,
+            'time_saved_minutes_min': minutes_min,
+            'time_saved_minutes_max': minutes_max,
+            'placed': created,
+        }
+    except: pass
 
     # Post-fix again after placement batches (some families re-evaluate visibility during placement)
     if variant_candidate:

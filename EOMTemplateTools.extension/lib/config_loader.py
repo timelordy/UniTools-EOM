@@ -64,6 +64,7 @@ def load_rules(path=None):
         'enable_existing_dedupe': False,
         'socket_spacing_mm': 3000,
         'socket_height_mm': 300,
+        'kitchen_fridge_height_mm': 300,
         'avoid_door_mm': 300,
         'avoid_radiator_mm': 500,
         'socket_dedupe_radius_mm': 300,

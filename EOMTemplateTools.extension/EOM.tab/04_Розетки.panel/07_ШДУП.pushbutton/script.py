@@ -19,8 +19,21 @@ import orchestrator
 def main():
     doc = revit.doc
     output = script.get_output()
-    orchestrator.run(doc, output)
-    report_time_saved(output, 'shdup')
+    created = orchestrator.run(doc, output)
+    report_time_saved(output, 'shdup', created)
+    try:
+        from time_savings import calculate_time_saved, calculate_time_saved_range
+        minutes = calculate_time_saved('shdup', created)
+        minutes_min, minutes_max = calculate_time_saved_range('shdup', created)
+        global EOM_HUB_RESULT
+        EOM_HUB_RESULT = {
+            'stats': {'total': created, 'processed': created, 'skipped': 0, 'errors': 0},
+            'time_saved_minutes': minutes,
+            'time_saved_minutes_min': minutes_min,
+            'time_saved_minutes_max': minutes_max,
+            'placed': created,
+        }
+    except: pass
 
 if __name__ == '__main__':
     try:

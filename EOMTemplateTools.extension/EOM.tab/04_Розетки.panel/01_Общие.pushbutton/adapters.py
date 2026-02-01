@@ -66,8 +66,8 @@ def get_link_doc(link_inst):
     return link_reader.get_link_doc(link_inst)
 
 
-def get_all_linked_rooms(link_doc):
-    return su._get_all_linked_rooms(link_doc)
+def get_all_linked_rooms(link_doc, level_ids=None):
+    return su._get_all_linked_rooms(link_doc, level_ids=level_ids)
 
 
 def collect_radiator_points(link_doc):

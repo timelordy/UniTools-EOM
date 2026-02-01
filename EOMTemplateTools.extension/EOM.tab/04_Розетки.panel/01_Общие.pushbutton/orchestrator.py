@@ -64,7 +64,13 @@ def run(doc, output):
     link_doc = adapters.get_link_doc(link_inst)
     if not link_doc: return
 
-    raw_rooms = adapters.get_all_linked_rooms(link_doc)
+    import link_reader
+    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни')
+    if not selected_levels:
+        return
+    
+    level_ids = [l.Id for l in selected_levels]
+    raw_rooms = adapters.get_all_linked_rooms(link_doc, level_ids=level_ids)
 
     hallway_rx = domain.compile_patterns(rules.get('hallway_room_name_patterns', constants.DEFAULT_HALLWAY_PATTERNS))
     wet_rx = domain.compile_patterns(rules.get('wet_room_name_patterns', constants.DEFAULT_WET_PATTERNS))

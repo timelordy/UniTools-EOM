@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-import sys
 import os
+import sys
 
 # Add lib path to sys.path
 try:
@@ -13,47 +13,38 @@ except Exception:
 
 from pyrevit import revit, script
 from utils_revit import log_exception
+from time_savings import report_time_saved, calculate_time_saved, calculate_time_saved_range
 import orchestrator
 
 def main():
     doc = revit.doc
     output = script.get_output()
     try:
-        target_path = os.path.normpath(
-            os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                '01_Placement.pulldown',
-                '02_Kitchen_Unit.pushbutton',
-                'script.py',
-            )
-        )
-    except Exception:
-        target_path = None
-
-    try:
-        if target_path and os.path.exists(target_path):
-            target_dir = os.path.dirname(target_path)
-            if target_dir in sys.path:
-                sys.path.remove(target_dir)
-            sys.path.insert(0, target_dir)
-            try:
-                sys.modules.pop('domain', None)
-            except Exception:
-                pass
-            import imp
-            mod = imp.load_source('kitchen_unit_unified', target_path)
-            if hasattr(mod, 'main'):
-                mod.main()
-                return
-    except Exception:
-        log_exception('Error in unified kitchen script')
-        return
-
-    output.print_md('Unified script not found: {0}'.format(target_path))
-    return
-
-if __name__ == '__main__':
-    try:
-        main()
+        created = orchestrator.run(doc, output)
     except Exception:
         log_exception('Error in 02_Kitchen_Unit')
+        created = 0
+
+    try:
+        created = int(created or 0)
+    except Exception:
+        created = 0
+
+    report_time_saved(output, 'kitchen_block', created)
+
+    try:
+        minutes = calculate_time_saved('kitchen_block', created)
+        minutes_min, minutes_max = calculate_time_saved_range('kitchen_block', created)
+        global EOM_HUB_RESULT
+        EOM_HUB_RESULT = {
+            'stats': {'total': created, 'processed': created, 'skipped': 0, 'errors': 0},
+            'time_saved_minutes': minutes,
+            'time_saved_minutes_min': minutes_min,
+            'time_saved_minutes_max': minutes_max,
+            'placed': created,
+        }
+    except Exception:
+        pass
+
+if __name__ == '__main__':
+    main()

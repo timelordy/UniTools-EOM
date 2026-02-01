@@ -6,6 +6,13 @@ import link_reader
 import placement_engine
 from utils_revit import alert, set_comments, tx, trace
 from utils_units import mm_to_ft
+try:
+    import socket_utils as su
+except ImportError:
+    import sys, os
+    sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'lib'))
+    import socket_utils as su
+
 from constants import (
     ENTRANCE_DOOR_DEFAULT_PATTERNS,
     ROOF_EXIT_DOOR_DEFAULT_PATTERNS,
@@ -388,74 +395,113 @@ def door_matches_patterns(door, patterns):
 
 
 def is_entrance_door(door, link_doc, entrance_patterns, outside_patterns, inside_patterns, public_room_patterns, apartment_room_patterns, entry_level_patterns):
-    if door_matches_patterns(door, entrance_patterns):
-        return True
-
+    dt = door_text(door)
+    
+    # 1. Negative check: Apartments and BALCONIES
+    BALCONY_PATTERNS = [u'балкон', u'лоджия', u'терраса', u'balcony', u'loggia', u'terrace', u'витраж']
+    if text_has_any(dt, apartment_room_patterns) or text_has_any(dt, BALCONY_PATTERNS):
+        return False
+        
     fr, tr = get_from_to_rooms(door, link_doc)
     if (fr is None) and (tr is None):
         return False
 
-    if (fr is None) or (tr is None):
-        room = fr if fr is not None else tr
-        if room_matches(room, inside_patterns):
-            return True
+    out_fr = is_room_outside(fr, outside_patterns)
+    out_tr = is_room_outside(tr, outside_patterns)
+    
+    has_fr = (fr is not None)
+    has_tr = (tr is not None)
 
-    outside_side = is_room_outside(fr, outside_patterns) or is_room_outside(tr, outside_patterns)
-    inside_side = room_matches(fr, inside_patterns) or room_matches(tr, inside_patterns)
-
-    public_side = is_public_room(fr, public_room_patterns) or is_public_room(tr, public_room_patterns)
-    apt_fr = is_apartment_room(fr, apartment_room_patterns)
-    apt_tr = is_apartment_room(tr, apartment_room_patterns)
-
-    if apt_fr and apt_tr:
+    # CRITICAL FIX 2: Reject connection between two INSIDE Public Rooms
+    # e.g. Vestibule <-> Stair, Corridor <-> Vestibule
+    in_fr_any = room_matches(fr, inside_patterns)
+    in_tr_any = room_matches(tr, inside_patterns)
+    
+    if has_fr and has_tr and in_fr_any and in_tr_any:
         return False
 
-    if outside_side and inside_side and public_side:
+    # CRITICAL FIX: Reject Internal Doors (General)
+    # If both sides have rooms, and NEITHER is explicitly "Street/Outside", then it is an INTERNAL door.
+    # We strictly want Entrance -> Outside.
+    if has_fr and has_tr and (not out_fr) and (not out_tr):
+        return False
+
+    # Helper to check for Main Entrance Rooms but EXCLUDE "Sluice"
+    def is_main_vestibule(room):
+        if room is None: return False
+        rn = room_name(room)
+        if not text_has_any(rn, [u'тамбур', u'вестиб', u'холл входа']):
+            return False
+        if text_has_any(rn, [u'шлюз', u'sluice']):
+            return False
         return True
+
+    # Negative check for residential rooms
+    if (has_fr and is_apartment_room(fr, apartment_room_patterns)) or \
+       (has_tr and is_apartment_room(tr, apartment_room_patterns)):
+        return False
+
+    # MAIN LOGIC: Clean Vestibule <-> Outside/Nothing
+    if is_main_vestibule(fr) and (not has_tr or out_tr):
+        return True
+    if is_main_vestibule(tr) and (not has_fr or out_fr):
+        return True
+
+    # Fallback: If named "Entrance" explicitly
+    if text_has_any(dt, entrance_patterns):
+         in_fr_any = room_matches(fr, inside_patterns)
+         in_tr_any = room_matches(tr, inside_patterns)
+         if (in_fr_any and (not has_tr or out_tr)) or (in_tr_any and (not has_fr or out_fr)):
+             return True
 
     return False
 
 
 def is_roof_exit_door(door, link_doc, roof_patterns, roof_room_patterns):
-    if door_matches_patterns(door, roof_patterns):
+    dt = door_text(door)
+    
+    # 1. Name/Room Name matches (Standard explicit check)
+    if text_has_any(dt, roof_patterns):
         return True
 
     fr, tr = get_from_to_rooms(door, link_doc)
     if (fr is None) and (tr is None):
         return False
 
-    return bool(room_matches(fr, roof_room_patterns) or room_matches(tr, roof_room_patterns))
+    if room_matches(fr, roof_room_patterns) or room_matches(tr, roof_room_patterns):
+        return True
+
+    # 2. IMPLICIT CHECK: Stairwell -> Outside (common for roof exits)
+    # Filter out Balconies first
+    BALCONY_PATTERNS = [u'балкон', u'лоджия', u'терраса', u'balcony', u'loggia', u'terrace', u'витраж']
+    if text_has_any(dt, BALCONY_PATTERNS):
+        return False
+        
+    STAIR_PATTERNS = [u'лестн', u'stair']
+    
+    in_fr_stair = room_matches(fr, STAIR_PATTERNS)
+    in_tr_stair = room_matches(tr, STAIR_PATTERNS)
+    
+    # Use global default for outside patterns since it's not passed here
+    from constants import OUTSIDE_DEFAULT_PATTERNS
+    
+    out_fr = is_room_outside(fr, OUTSIDE_DEFAULT_PATTERNS)
+    out_tr = is_room_outside(tr, OUTSIDE_DEFAULT_PATTERNS)
+    
+    has_fr = (fr is not None)
+    has_tr = (tr is not None)
+
+    # Stair <-> Outside/Nothing
+    if in_fr_stair and (not has_tr or out_tr):
+        return True
+    if in_tr_stair and (not has_fr or out_fr):
+        return True
+
+    return False
 
 
 def select_link_instance_ru(host_doc, title):
-    links = link_reader.list_link_instances(host_doc)
-    if not links:
-        return None
-
-    items = []
-    for ln in links:
-        try:
-            name = ln.Name
-        except Exception:
-            name = u'<Связь>'
-        status = u'Загружена' if link_reader.is_link_loaded(ln) else u'Не загружена'
-        items.append((u'{0}  [{1}]'.format(name, status), ln))
-
-    items = sorted(items, key=lambda x: norm(x[0]))
-    picked = forms.SelectFromList.show(
-        [x[0] for x in items],
-        title=title,
-        multiselect=False,
-        button_name='Выбрать',
-        allow_none=True
-    )
-    if not picked:
-        return None
-
-    for lbl, inst in items:
-        if lbl == picked:
-            return inst
-    return None
+    return link_reader.select_link_instance_auto(host_doc)
 
 
 def run_placement(doc, output, script_module):
@@ -500,9 +546,9 @@ def run_placement(doc, output, script_module):
         alert('Не удалось получить доступ к документу связи.')
         return
 
-    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни для обработки')
+    selected_levels = link_reader.list_levels(link_doc)
     if not selected_levels:
-        output.print_md('**Отменено (уровни не выбраны).**')
+        output.print_md('**Нет уровней в связанном файле.**')
         return
 
     level_ids = []
@@ -556,6 +602,16 @@ def run_placement(doc, output, script_module):
         'skipped': 0,
     }
 
+    def _get_level_name(d):
+        try:
+            lid = d.LevelId
+            if lid:
+                l = link_doc.GetElement(lid)
+                return l.Name if l else str(lid)
+        except Exception:
+            pass
+        return "?"
+
     def _process_door(door):
         try:
             if door is None or (hasattr(door, 'IsValidObject') and (not door.IsValidObject)):
@@ -592,6 +648,18 @@ def run_placement(doc, output, script_module):
         )
         if (not is_roof) and (not is_entrance):
             return
+            
+        # DEBUG LOGGING FOR USER
+        fr_log, tr_log = get_from_to_rooms(door, link_doc)
+        rn_fr = room_name(fr_log)
+        rn_tr = room_name(tr_log)
+        d_name = door_text(door)
+        lvl_name = _get_level_name(door)
+        
+        kind = "ENTRANCE"
+        if is_roof: kind = "ROOF"
+        
+        output.print_md(u'- ACCEPTED ({}): ID `{}` | Level: `{}` | Door: `{}` | Rooms: `{}` <-> `{}`'.format(kind, door.Id, lvl_name, d_name, rn_fr, rn_tr))
 
         counts['total'] += 1
         c = door_center_point_link(door)
@@ -656,7 +724,8 @@ def run_placement(doc, output, script_module):
     with tx('ЭОМ: Светильники над входами', doc=doc, swallow_warnings=True):
         for lid in level_ids:
             try:
-                it = link_reader.iter_elements_by_category(link_doc, DB.BuiltInCategory.OST_Doors, limit=scan_limit, level_id=lid)
+                # Fix: pass DB.ElementId because link_reader expects an object with .IntegerValue
+                it = link_reader.iter_elements_by_category(link_doc, DB.BuiltInCategory.OST_Doors, limit=scan_limit, level_id=DB.ElementId(lid))
             except Exception:
                 it = []
 

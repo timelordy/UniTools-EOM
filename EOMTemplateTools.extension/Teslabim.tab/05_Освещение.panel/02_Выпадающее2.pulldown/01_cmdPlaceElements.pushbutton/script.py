@@ -268,34 +268,7 @@ def _is_excluded_room(room):
 
 
 def _select_link_instance_ru(host_doc, title):
-    links = link_reader.list_link_instances(host_doc)
-    if not links:
-        return None
-
-    items = []
-    for ln in links:
-        try:
-            name = ln.Name
-        except Exception:
-            name = u'<Связь>'
-        status = u'Загружена' if link_reader.is_link_loaded(ln) else u'Не загружена'
-        items.append((u'{0}  [{1}]'.format(name, status), ln))
-
-    items = sorted(items, key=lambda x: _norm(x[0]))
-    picked = forms.SelectFromList.show(
-        [x[0] for x in items],
-        title=title,
-        multiselect=False,
-        button_name='Выбрать',
-        allow_none=True
-    )
-    if not picked:
-        return None
-
-    for lbl, inst in items:
-        if lbl == picked:
-            return inst
-    return None
+    return link_reader.select_link_instance_auto(host_doc)
 
 
 def _get_or_create_debug_view(doc, level_id):

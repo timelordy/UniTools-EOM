@@ -127,6 +127,67 @@ def _room_text(room):
     return u' '.join([p for p in parts if p])
 
 
+def get_room_apartment_number(room):
+    """
+    Extract apartment number from room.
+    Strategy:
+    1. Check 'Квартира' parameter (Explicit is best).
+    2. Check 'Department' (BuiltInParameter.ROOM_DEPARTMENT).
+    3. Check 'Number' (BuiltInParameter.ROOM_NUMBER) splitting by dot.
+    """
+    if room is None: return None
+
+    def _is_valid_apt(val):
+        if not val: return False
+        v = val.strip().lower()
+        if not v: return False
+        # Reject generic words
+        if v in [u'квартира', u'apartment', u'flat', u'room', u'моп']: return False
+        # Must contain at least one digit to be a valid apartment number
+        return any(c.isdigit() for c in v)
+
+    # 1. 'Квартира' param - HIGHEST PRIORITY
+    # (ADSK Standard or explicit override)
+    try:
+        p = room.LookupParameter(u'Квартира')
+        if p:
+            val = p.AsString()
+            clean_val = _clean_apt_number(val)
+            if _is_valid_apt(clean_val):
+                return clean_val
+    except: pass
+
+    # 2. Department
+    try:
+        dept = _get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_DEPARTMENT)
+        clean_dept = _clean_apt_number(dept)
+        if _is_valid_apt(clean_dept):
+            return clean_dept
+    except: pass
+    
+    # 3. Room Number parsing (101.1 -> 101) - FALLBACK
+    # Ambiguous: 101.1 (Apt 101) vs 1.102 (Section 1, Room 102)
+    # Use only if other methods fail.
+    try:
+        num = _get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_NUMBER)
+        if num:
+            parts = num.split('.')
+            if len(parts) > 1 and parts[0].isdigit():
+                return parts[0]
+    except: pass
+
+    return None
+
+def _clean_apt_number(val):
+    if not val: return u''
+    v = val.strip()
+    # Regex to remove "кв." prefix (case insensitive)
+    # ^(кв\.?|apt\.?)\s*
+    import re
+    v = re.sub(r'^(кв\.?|apt\.?|квартира)\s*', '', v, flags=re.IGNORECASE)
+    return v.upper()
+
+
 def _room_is_wc(room, rules=None):
     """Best-effort: detect WC/Sanuzel by room text.
 
@@ -154,31 +215,19 @@ def _room_is_wc(room, rules=None):
     return False
 
 def _select_link_instance_ru(host_doc, title):
-    links = link_reader.list_link_instances(host_doc)
-    if not links: return None
-    try:
-        loaded = [ln for ln in links if link_reader.is_link_loaded(ln)]
-        if len(loaded) == 1: return loaded[0]
-    except: pass
-    items = []
-    for ln in links:
-        try: name = ln.Name
-        except: name = u'<Связь>'
-        status = u'Загружена' if link_reader.is_link_loaded(ln) else u'Не загружена'
-        items.append((u'{0}  [{1}]'.format(name, status), ln))
-    items = sorted(items, key=lambda x: _norm(x[0]))
-    picked = forms.SelectFromList.show([x[0] for x in items], title=title, multiselect=False, button_name='Выбрать', allow_none=True)
-    if not picked: return None
-    for lbl, inst in items:
-        if lbl == picked: return inst
-    return None
+    return link_reader.select_link_instance_auto(host_doc)
 
-def _get_all_linked_rooms(link_doc, limit=None):
+def _get_all_linked_rooms(link_doc, limit=None, level_ids=None):
     rooms = []
     if link_doc is None: return rooms
     try:
-        it = link_reader.iter_rooms(link_doc, limit=limit, level_id=None)
-        for r in it: rooms.append(r)
+        if level_ids:
+            for lid in level_ids:
+                it = link_reader.iter_rooms(link_doc, limit=limit, level_id=lid)
+                for r in it: rooms.append(r)
+        else:
+            it = link_reader.iter_rooms(link_doc, limit=limit, level_id=None)
+            for r in it: rooms.append(r)
     except: pass
     return rooms
 

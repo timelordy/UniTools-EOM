@@ -12,6 +12,12 @@ import math
 
 from pyrevit import DB, forms, revit, script
 from time_savings import report_time_saved
+try:
+    import socket_utils as su
+except ImportError:
+    import sys, os
+    sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'lib'))
+    import socket_utils as su
 
 from adapters import (
     calc_switch_position,
@@ -42,23 +48,25 @@ def main():
     output = script.get_output()
     output.print_md(u"# Размещение выключателей")
 
-    links = list(DB.FilteredElementCollector(doc).OfClass(DB.RevitLinkInstance))
-    if not links:
-        forms.alert(u"Связи АР не найдены", exitscript=True)
+    import link_reader
+    link_inst = link_reader.select_link_instance_auto(doc)
+    if not link_inst:
+        forms.alert(u"Связь АР не найдена", exitscript=True)
         return
 
-    link_names = [l.Name for l in links]
-    selected = forms.SelectFromList.show(link_names, title=u"Выберите связь АР")
-    if not selected:
-        return
-
-    link_inst = links[link_names.index(selected)]
     link_doc = link_inst.GetLinkDocument()
     if not link_doc:
         forms.alert(u"Связь не загружена", exitscript=True)
         return
 
     link_transform = link_inst.GetTotalTransform()
+
+    # Select Levels
+    selected_levels = link_reader.select_levels_multi(link_doc, title=u"Выберите этажи")
+    if not selected_levels:
+        return
+
+    selected_level_ids = {l.Id.IntegerValue for l in selected_levels}
 
     sym_1g = get_switch_symbol(doc, two_gang=False)
     sym_2g = get_switch_symbol(doc, two_gang=True)
@@ -83,7 +91,7 @@ def main():
 
     rooms = [r for r in DB.FilteredElementCollector(link_doc)
              .OfCategory(DB.BuiltInCategory.OST_Rooms)
-             if r.Area > 0]
+             if r.Area > 0 and r.LevelId.IntegerValue in selected_level_ids]
 
     doors = list(DB.FilteredElementCollector(link_doc)
                  .OfCategory(DB.BuiltInCategory.OST_Doors)
@@ -315,7 +323,21 @@ def main():
     output.print_md(u"- Выключателей: **{}**".format(created))
     output.print_md(u"- Пропущено: {}".format(skipped))
 
-    report_time_saved(output, 'switches')
+    report_time_saved(output, 'switches_doors', created)
+    try:
+        from time_savings import calculate_time_saved, calculate_time_saved_range
+        minutes = calculate_time_saved('switches_doors', created)
+        minutes_min, minutes_max = calculate_time_saved_range('switches_doors', created)
+        global EOM_HUB_RESULT
+        stats = {'total': created, 'processed': created, 'skipped': skipped, 'errors': 0}
+        EOM_HUB_RESULT = {
+            'stats': stats,
+            'time_saved_minutes': minutes,
+            'time_saved_minutes_min': minutes_min,
+            'time_saved_minutes_max': minutes_max,
+            'placed': created,
+        }
+    except: pass
 
     if created > 0:
         forms.alert(u"Создано {} выключателей".format(created))

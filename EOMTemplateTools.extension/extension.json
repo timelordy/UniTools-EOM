@@ -1,0 +1,10 @@
+ {
+   "name": "EOMTemplateTools",
+   "type": "extension",
+   "description": "EOM Template Tools for Revit",
+   "author": "EOM Team",
+   "builtin": "False",
+   "default_enabled": "True",
+   "rocket_mode_compatible": "True",
+   "dependencies": []
+ }

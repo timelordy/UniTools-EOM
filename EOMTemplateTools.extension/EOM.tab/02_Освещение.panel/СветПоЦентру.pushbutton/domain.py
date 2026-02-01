@@ -327,16 +327,14 @@ def get_room_center_link(room):
         if boundary_pts:
             n_pts = len(boundary_pts)
             rname = room_name(room)
-            print(u'DEBUG L-shape: Room "{0}" has {1} boundary vertices'.format(rname, n_pts))
             if n_pts == 6:
                 l_center = _get_l_shape_intersection_center(boundary_pts, fallback_z)
                 if l_center:
-                    print(u'DEBUG L-shape: Using L-shape center for "{0}"'.format(rname))
                     return l_center
         else:
-            print(u'DEBUG L-shape: Room "{0}" - could not get boundary points'.format(room_name(room)))
+            pass
     except Exception as e:
-        print(u'DEBUG L-shape: Exception for room: {0}'.format(str(e)))
+        pass
 
     # 2. Try BBox Center + Verification
     try:

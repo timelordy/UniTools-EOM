@@ -134,31 +134,26 @@ else:
 # На входе список znach3 из Хранилища
 # На выходе ничего, но объявлены нужные нам списки
 def _select_space_sources(host_doc):
-	items = [(u"Текущая модель", None)]
-	for ln in link_reader.list_link_instances(host_doc):
-		try:
-			status = u'Загружена' if link_reader.is_link_loaded(ln) else u'Не загружена'
-			name = getattr(ln, 'Name', u'Связь')
-			label = u"Связь: {0} ({1})".format(name, status)
-		except Exception:
-			label = u"Связь"
-		items.append((label, ln))
-
-	labels = [i[0] for i in items]
-	picked = forms.SelectFromList.show(
-		labels,
-		title=u"Источник пространств",
-		multiselect=True,
-		button_name=u"Продолжить"
-	)
-	if not picked:
-		return []
-
-	label2obj = {lbl: obj for (lbl, obj) in items}
-	out = []
-	for lbl in picked:
-		out.append((lbl, label2obj.get(lbl)))
-	return out
+    # Auto-select: prefer first loaded link, otherwise current model
+    out = []
+    
+    # 1. Try link
+    link_inst = link_reader.select_link_instance_auto(host_doc)
+    if link_inst:
+        try:
+            name = getattr(link_inst, 'Name', u'Связь')
+            label = u"Связь: {0}".format(name)
+            out.append((label, link_inst))
+        except Exception:
+            pass
+            
+    # 2. If no link (or just always?), add current model? 
+    # User said "find the one that exists". If link exists, use it.
+    # If no link, use current?
+    if not out:
+        out.append((u"Текущая модель", None))
+        
+    return out
 
 
 def _iter_spaces_for_source(host_doc, source_tuple):

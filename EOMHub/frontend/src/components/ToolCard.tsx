@@ -46,7 +46,6 @@ const ToolCard = memo(function ToolCard({
           <img 
             src={tool.icon} 
             alt={tool.name}
-            style={{ width: '64px', height: '64px', objectFit: 'contain' }}
           />
         ) : (
           <span>{tool.icon}</span>

@@ -10,6 +10,7 @@ import time
 import tempfile
 import base64
 import uuid
+import sys
 from pathlib import Path
 import datetime
 
@@ -40,6 +41,48 @@ def log(message: str):
 log("=" * 60)
 log("EOM Hub API started")
 log(f"Log file: {LOG_FILE}")
+
+_ICON_CACHE: dict[str, str] = {}
+
+
+def _resolve_icon_data(icon: str) -> str:
+    if not isinstance(icon, str):
+        return icon
+    cached = _ICON_CACHE.get(icon)
+    if cached is not None:
+        return cached
+    if icon.startswith("data:image/"):
+        _ICON_CACHE[icon] = icon
+        return icon
+    if not icon.startswith("/icons/"):
+        _ICON_CACHE[icon] = icon
+        return icon
+
+    rel_path = icon.lstrip("/")
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        base_path = Path(getattr(sys, "_MEIPASS", ""))
+        if str(base_path):
+            candidates.append(base_path / "frontend" / "dist" / rel_path)
+    project_root = Path(__file__).parent.parent.parent
+    candidates.append(project_root / "frontend" / "dist" / rel_path)
+    candidates.append(project_root / "frontend" / "public" / rel_path)
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            data = path.read_bytes()
+            b64 = base64.b64encode(data).decode("ascii")
+            data_uri = f"data:image/png;base64,{b64}"
+            _ICON_CACHE[icon] = data_uri
+            return data_uri
+        except Exception as e:
+            log(f"Icon read error: {path} -> {e}")
+            break
+
+    _ICON_CACHE[icon] = icon
+    return icon
 
 def _get_temp_root() -> str:
     return os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()
@@ -186,7 +229,7 @@ def _get_tools_config() -> dict:
         "lights_center": {
           "id": "lights_center",
           "name": "Свет по центрам",
-          "icon": "💡",
+          "icon": "/icons/lights_center.png",
           "description": "Размещение светильников по центрам помещений",
           "category": "lighting",
           "time_saved": 15,
@@ -195,7 +238,7 @@ def _get_tools_config() -> dict:
         "lights_elevator": {
           "id": "lights_elevator",
           "name": "Свет в лифтах",
-          "icon": "🛗",
+          "icon": "/icons/lights_elevator.png",
           "description": "Освещение лифтовых холлов",
           "category": "lighting",
           "time_saved": 8,
@@ -204,7 +247,7 @@ def _get_tools_config() -> dict:
         "panel_door": {
           "id": "panel_door",
           "name": "Щит над дверью",
-          "icon": "📦",
+          "icon": "/icons/panel_door.png",
           "description": "Установка квартирного щита над входной дверью",
           "category": "panels",
           "time_saved": 10,
@@ -213,7 +256,7 @@ def _get_tools_config() -> dict:
         "switches_doors": {
           "id": "switches_doors",
           "name": "Выключатели",
-          "icon": "🔘",
+          "icon": "/icons/switches_doors.png",
           "description": "Авто-размещение выключателей у дверей",
           "category": "panels",
           "time_saved": 30,
@@ -222,7 +265,7 @@ def _get_tools_config() -> dict:
         "sockets_general": {
           "id": "sockets_general",
           "name": "Общие розетки",
-          "icon": "🔌",
+          "icon": "/icons/sockets_general.png",
           "description": "Проверка и настройка параметров розеток",
           "category": "sockets",
           "time_saved": 5,
@@ -231,7 +274,7 @@ def _get_tools_config() -> dict:
         "kitchen_block": {
           "id": "kitchen_block",
           "name": "Кухня: Гарнитур",
-          "icon": "🍳",
+          "icon": "/icons/kitchen_block.png",
           "description": "Розетки для встроенной кухонной техники",
           "category": "sockets",
           "time_saved": 25,
@@ -240,7 +283,7 @@ def _get_tools_config() -> dict:
         "wet_zones": {
           "id": "wet_zones",
           "name": "Мокрые зоны",
-          "icon": "💧",
+          "icon": "/icons/wet_zones.png",
           "description": "Розетки в санузлах (стиральные и пр.)",
           "category": "sockets",
           "time_saved": 10,
@@ -249,7 +292,7 @@ def _get_tools_config() -> dict:
         "low_voltage": {
           "id": "low_voltage",
           "name": "Слаботочка",
-          "icon": "📡",
+          "icon": "/icons/low_voltage.png",
           "description": "ТВ и Интернет розетки",
           "category": "sockets",
           "time_saved": 15,
@@ -258,7 +301,7 @@ def _get_tools_config() -> dict:
         "shdup": {
           "id": "shdup",
           "name": "ШДУП",
-          "icon": "⚡",
+          "icon": "/icons/shdup.png",
           "description": "Шина дополнительного уравнивания потенциалов",
           "category": "sockets",
           "time_saved": 5,
@@ -306,16 +349,11 @@ def _get_tools_config() -> dict:
       }
     }
 
-    # Now we just need to resolve script paths to verification
-    # But since we are strictly using this list, we assume these paths exist in EOM.tab
-    # We still need to find tab_path to allow verifying existence if we wanted, 
-    # OR we just pass the relative paths and let run_tool handle it.
-    # run_tool looks up script_path from this config.
-    # But get_tools_list needs to return valid tools.
-    
-    # Let's ensure 'tools' has all needed fields.
-    # We can skip the 'scan' part entirely. 
-    # The frontend only needs id, name, description, category, icon.
+    # Normalize icon values for frontend usage.
+    for tool in config.get("tools", {}).values():
+        icon = tool.get("icon")
+        if isinstance(icon, str):
+            tool["icon"] = _resolve_icon_data(icon)
     
     return config
 

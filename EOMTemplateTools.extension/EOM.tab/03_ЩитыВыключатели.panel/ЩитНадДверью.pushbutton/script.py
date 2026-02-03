@@ -140,6 +140,13 @@ PANEL_GENERIC_KEYWORDS = [u'щит', u'panel']
 PANEL_WEAK_KEYWORDS = [u'щр', u'board']
 PANEL_NEGATIVE_KEYWORDS = [u'вру', u'грщ', u'main', u'уго', u'аннотац']
 
+# Apartment parameter detection (strict by default)
+APT_PARAM_NAMES_DEFAULT = [u'Квартира', u'Номер квартиры', u'ADSK_Номер квартиры', u'ADSK_Номер_квартиры', u'Apartment', u'Flat']
+APT_PARAM_NAMES = []
+APT_REQUIRE_PARAM = True
+APT_ALLOW_DEPARTMENT = False
+APT_ALLOW_NUMBER = False
+
 
 def _norm(s):
     try:
@@ -239,6 +246,115 @@ def _get_param_as_string(elem, bip=None, name=None):
         return s if s is not None else u''
     except Exception:
         return u''
+
+
+def _param_to_string(p):
+    if p is None:
+        return u''
+    try:
+        st = p.StorageType
+    except Exception:
+        st = None
+    try:
+        if st == DB.StorageType.String:
+            s = p.AsString()
+            return s if s is not None else u''
+        if st == DB.StorageType.Integer:
+            try:
+                return unicode(p.AsInteger())
+            except Exception:
+                return u''
+        if st == DB.StorageType.Double:
+            try:
+                return p.AsValueString() or u''
+            except Exception:
+                return u''
+        if st == DB.StorageType.ElementId:
+            try:
+                eid = p.AsElementId()
+                return unicode(eid.IntegerValue) if eid is not None else u''
+            except Exception:
+                return u''
+    except Exception:
+        pass
+    try:
+        return p.AsValueString() or u''
+    except Exception:
+        return u''
+
+
+def _clean_apt_number(val):
+    if not val:
+        return u''
+    try:
+        v = val.strip()
+    except Exception:
+        v = val
+    try:
+        v = re.sub(r'^(кв\.?|apt\.?|квартира)\s*', '', v, flags=re.IGNORECASE)
+    except Exception:
+        pass
+    try:
+        return v.upper()
+    except Exception:
+        return v
+
+
+def _is_valid_apt_value(val):
+    if not val:
+        return False
+    try:
+        v = val.strip().lower()
+    except Exception:
+        v = val
+    if not v:
+        return False
+    if v in [u'квартира', u'apartment', u'flat', u'room', u'моп']:
+        return False
+    try:
+        return any(ch.isdigit() for ch in v)
+    except Exception:
+        return False
+
+
+def _get_room_apartment_number_strict(room):
+    if room is None:
+        return None
+
+    # 1) Explicit apartment params
+    for pname in (APT_PARAM_NAMES or []):
+        try:
+            p = _find_param_by_norm(room, pname)
+        except Exception:
+            p = None
+        if p is None:
+            continue
+        val = _param_to_string(p)
+        clean_val = _clean_apt_number(val)
+        if _is_valid_apt_value(clean_val):
+            return clean_val
+
+    # 2) Optional fallbacks (off by default)
+    if APT_ALLOW_DEPARTMENT:
+        try:
+            dept = _get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_DEPARTMENT, name='Department')
+            clean_dept = _clean_apt_number(dept)
+            if _is_valid_apt_value(clean_dept):
+                return clean_dept
+        except Exception:
+            pass
+
+    if APT_ALLOW_NUMBER:
+        try:
+            num = _get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_NUMBER, name='Number')
+            if num:
+                parts = num.split('.')
+                if len(parts) > 1 and parts[0].isdigit():
+                    return parts[0]
+        except Exception:
+            pass
+
+    return None
 
 
 def _door_text(door):
@@ -1391,6 +1507,26 @@ def _try_get_apartment_number(door, link_doc):
     except Exception:
         phases = []
 
+    # 1) Prefer explicit apartment number from room parameters (strict)
+    for r in _iter_from_to_rooms(door, phases):
+        try:
+            apt = _get_room_apartment_number_strict(r)
+            if apt:
+                return str(apt)
+        except Exception:
+            continue
+
+    # 2) Optional: non-strict fallback
+    if not APT_REQUIRE_PARAM:
+        for r in _iter_from_to_rooms(door, phases):
+            try:
+                apt = su.get_room_apartment_number(r)
+                if apt:
+                    return str(apt)
+            except Exception:
+                continue
+
+    # 3) Fallback: hallway room number
     for r in _iter_from_to_rooms(door, phases):
         try:
             name = _norm(getattr(r, 'Name', u''))
@@ -1522,27 +1658,37 @@ def _pick_apartment_room(door, link_doc):
     except Exception:
         phases = []
 
-    best = None
+    best_apt = None
+    best_kw = None
     for r in _iter_from_to_rooms(door, phases):
         try:
             name = _norm(getattr(r, 'Name', u''))
         except Exception:
             name = u''
 
+        # Prefer explicit apartment rooms (parameter-based)
+        try:
+            if _room_has_apartment(r):
+                if name and HALL_KEYWORD in name:
+                    return r
+                best_apt = best_apt or r
+        except Exception:
+            pass
+
         if not name:
             continue
 
-        # strong match
+        # strong match (name-based fallback)
         if HALL_KEYWORD in name:
             return r
 
-        # weaker apartment hints
+        # weaker apartment hints (name-based fallback)
         for kw in APARTMENT_ROOM_KEYWORDS:
             if _norm(kw) and _norm(kw) in name:
-                best = best or r
+                best_kw = best_kw or r
                 break
 
-    return best
+    return best_apt or best_kw
 
 
 def _get_last_phase(doc):
@@ -1568,6 +1714,19 @@ def _try_get_room_at_point(doc, pt, phase=None):
         return None
 
 
+def _room_has_apartment(room):
+    if room is None:
+        return False
+    try:
+        if _get_room_apartment_number_strict(room):
+            return True
+        if APT_REQUIRE_PARAM:
+            return False
+        return bool(su.get_room_apartment_number(room))
+    except Exception:
+        return False
+
+
 def _score_room_apartment(room):
     if room is None:
         return 0
@@ -1577,9 +1736,15 @@ def _score_room_apartment(room):
         name = u''
 
     if not name:
-        return 0
+        name = u''
 
     score = 0
+    # Strong positive signal when room has explicit apartment number
+    try:
+        if _room_has_apartment(room):
+            score += 120
+    except Exception:
+        pass
     # Strong preference for Hallway inside apartment
     if HALL_KEYWORD in name:
         score += 100
@@ -1625,6 +1790,7 @@ def _is_confirmed_apartment_door(door, link_doc):
 
     has_apt = False
     has_outside = False
+    has_apt_param = False
 
     # Check phases in order of likelihood
     # If we find a valid room configuration in ANY phase, we accept it.
@@ -1647,6 +1813,11 @@ def _is_confirmed_apartment_door(door, link_doc):
         this_phase_out = False
         
         for r in found_rooms:
+            try:
+                if _room_has_apartment(r):
+                    has_apt_param = True
+            except Exception:
+                pass
             sc = _score_room_apartment(r)
             if sc > 0: this_phase_apt = True
             if sc < -50: this_phase_out = True
@@ -1658,6 +1829,10 @@ def _is_confirmed_apartment_door(door, link_doc):
         # Optimization: if we found both, we are sure.
         if has_apt and has_outside:
              return True
+
+    # Require explicit apartment room assignment
+    if not has_apt_param:
+        return False
 
     # If we noticed it's an apartment entrance in at least one phase
     if has_apt and has_outside:
@@ -2809,6 +2984,26 @@ def main():
     output.print_md('Найдено помещений в связи: **{0}**'.format(room_count))
 
     rules = config_loader.load_rules()
+    # Apartment param rules (strict by default)
+    global APT_PARAM_NAMES, APT_REQUIRE_PARAM, APT_ALLOW_DEPARTMENT, APT_ALLOW_NUMBER
+    try:
+        APT_PARAM_NAMES = list((rules.get('apartment_param_names', []) or []))
+    except Exception:
+        APT_PARAM_NAMES = []
+    if not APT_PARAM_NAMES:
+        APT_PARAM_NAMES = list(APT_PARAM_NAMES_DEFAULT)
+    try:
+        APT_REQUIRE_PARAM = bool(rules.get('apartment_require_param', True))
+    except Exception:
+        APT_REQUIRE_PARAM = True
+    try:
+        APT_ALLOW_DEPARTMENT = bool(rules.get('apartment_allow_department_fallback', False))
+    except Exception:
+        APT_ALLOW_DEPARTMENT = False
+    try:
+        APT_ALLOW_NUMBER = bool(rules.get('apartment_allow_room_number_fallback', False))
+    except Exception:
+        APT_ALLOW_NUMBER = False
     comment_tag = rules.get('comment_tag', 'AUTO_EOM')
     offset_mm = rules.get('panel_above_door_offset_mm', 300)
     recess_mm = rules.get('panel_recess_mm', 40)
@@ -3017,17 +3212,17 @@ def main():
                                 
                             n1 = getattr(r1, 'Name', 'None')
                             n2 = getattr(r2, 'Name', 'None')
-                            debug_log.append(u"Warn '{0}': rooms {1}/{2} not Apt+Out (Phase: {3}) -> ACCEPTING by name property".format(tname, n1, n2, ph.Name if ph else '?'))
+                            debug_log.append(u"Skip '{0}': rooms {1}/{2} not Apt+Out (Phase: {3}) -> REJECTED (no apartment)".format(tname, n1, n2, ph.Name if ph else '?'))
                         except:
-                            debug_log.append(u"Warn '{0}': rooms check failed -> ACCEPTING by name property".format(tname))
-                    # Fallback: Accept valid steel doors even if room topology is unclear (User request)
-                    pass
+                            debug_log.append(u"Skip '{0}': rooms check failed -> REJECTED (no apartment)".format(tname))
+                    # Skip doors without confirmed apartment rooms
+                    continue
                 
                 target_doors.append(d)
             except Exception:
                 continue
 
-    reason = 'Авто: только стальные двери (в названии семейства/типа есть "сталь"/"стал"/"steel")'
+    reason = 'Авто: только стальные двери и только при наличии квартиры у помещения (параметр/номер квартиры)'
 
     if not target_doors:
         # Help user understand why detection failed

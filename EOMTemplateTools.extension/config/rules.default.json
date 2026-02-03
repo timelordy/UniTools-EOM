@@ -48,6 +48,17 @@
                                    ],
     "switch_offset_from_jamb_mm":  150,
     "scan_limit_doors":  500,
+    "apartment_param_names":  [
+                                 "Квартира",
+                                 "Номер квартиры",
+                                 "ADSK_Номер квартиры",
+                                 "ADSK_Номер_квартиры",
+                                 "Apartment",
+                                 "Flat"
+                             ],
+    "apartment_require_param":  true,
+    "apartment_allow_department_fallback":  false,
+    "apartment_allow_room_number_fallback":  false,
     "socket_ac_offset_from_corner_mm":  200,
     "low_voltage_cabinet_keywords":  [
                                          "сск",

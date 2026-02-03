@@ -312,7 +312,16 @@ def _is_valid_apt_value(val):
     if v in [u'квартира', u'apartment', u'flat', u'room', u'моп']:
         return False
     try:
-        return any(ch.isdigit() for ch in v)
+        if not any(ch.isdigit() for ch in v):
+            return False
+        digits = u''.join([ch for ch in v if ch.isdigit()])
+        if digits:
+            try:
+                if int(digits) <= 0:
+                    return False
+            except Exception:
+                pass
+        return True
     except Exception:
         return False
 

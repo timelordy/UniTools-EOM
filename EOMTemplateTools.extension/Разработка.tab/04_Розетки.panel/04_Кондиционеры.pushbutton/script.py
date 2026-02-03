@@ -33,7 +33,7 @@ OFFSET_FROM_CEILING_MM = 300
 # Max distance from basket to room (mm)
 MAX_BASKET_TO_ROOM_DIST_MM = 3000
 # Search Keywords
-AC_KEYWORDS = ['РєРѕРЅРґРёС†', 'РєРѕРЅРґРёС†РёРѕРЅРµСЂ', 'РєРѕРЅРґ', 'РЅР°СЂСѓР¶РЅС‹Р№ Р±Р»РѕРє', 'РІРЅРµС€РЅРёР№ Р±Р»РѕРє', 'external unit', 'outdoor unit', 'air conditioner']
+AC_KEYWORDS = ['кондиц', 'кондиционер', 'конд', 'наружный блок', 'внешний блок', 'external unit', 'outdoor unit', 'air conditioner']
 
 def mm_to_ft(mm):
     return float(mm) / 304.8
@@ -256,20 +256,20 @@ def analyze_basket_location(basket, room, link_doc):
     return None, "No Perpendicular Wall Found"
 
 def main():
-    output.print_md("# рџ”Њ AC Socket Placement v3.0 (Ralph)")
+    output.print_md("# 🔌 AC Socket Placement v3.0 (Ralph)")
     output.print_md("_Strict Perpendicular / Side Wall Logic_")
     
     # 1. Select Links
     link_inst = link_reader.select_link_instance_auto(doc)
     if not link_inst:
-        output.print_md("вќЊ No loaded links found.")
+        output.print_md("❌ No loaded links found.")
         return
         
     link_insts = [link_inst]
         
     # 2. Load Config (for socket type)
     rules = config_loader.load_rules()
-    socket_type_name = rules.get('socket_ac_family_type_name', 'TSL_EF_С‚_РЎРў_РІ_IP20_Р Р·С‚_1P+N+PE')
+    socket_type_name = rules.get('socket_ac_family_type_name', 'TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE')
     
     # Find Socket Symbol
     socket_symbol = None
@@ -280,7 +280,7 @@ def main():
             break
             
     if not socket_symbol:
-        output.print_md("вќЊ Socket Type '{}' not found!".format(socket_type_name))
+        output.print_md("❌ Socket Type '{}' not found!".format(socket_type_name))
         return
 
     # Activate Symbol
@@ -461,7 +461,7 @@ def main():
                     print("Basket error: " + str(ex))
                     continue
 
-    output.print_md("\nвњ… **Completed! Created {} sockets.**".format(total_created))
+    output.print_md("\n✅ **Completed! Created {} sockets.**".format(total_created))
     try:
         from time_savings import report_time_saved, calculate_time_saved, calculate_time_saved_range, set_room_count_override
         room_count = len(rooms_used) if rooms_used is not None else None
@@ -485,6 +485,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 

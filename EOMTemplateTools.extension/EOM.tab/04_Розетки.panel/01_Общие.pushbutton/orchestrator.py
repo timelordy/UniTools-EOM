@@ -19,7 +19,7 @@ from utils_units import mm_to_ft
 
 
 def run(doc, output):
-    output.print_md('# 01. Р РѕР·РµС‚РєРё: РћР±С‰РёРµ (Р¶РёР»С‹Рµ/РєРѕСЂРёРґРѕСЂС‹)')
+    output.print_md('# 01. Розетки: Общие (жилые/коридоры)')
 
     rules = adapters.get_rules()
     comment_tag = rules.get('comment_tag', constants.COMMENT_TAG_DEFAULT)
@@ -59,13 +59,13 @@ def run(doc, output):
     su._store_symbol_unique_id(cfg, 'last_socket_general_symbol_uid', sym_gen)
     adapters.save_config()
 
-    link_inst = adapters.select_link_instance(doc, 'Р’С‹Р±РµСЂРёС‚Рµ СЃРІСЏР·СЊ РђР ')
+    link_inst = adapters.select_link_instance(doc, 'Выберите связь АР')
     if not link_inst: return
     link_doc = adapters.get_link_doc(link_inst)
     if not link_doc: return
 
     import link_reader
-    selected_levels = link_reader.select_levels_multi(link_doc, title='Р’С‹Р±РµСЂРёС‚Рµ СѓСЂРѕРІРЅРё')
+    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни')
     if not selected_levels:
         return
     
@@ -79,14 +79,14 @@ def run(doc, output):
 
     apt_pats = list(rules.get('entrance_apartment_room_name_patterns', constants.DEFAULT_APARTMENT_PATTERNS) or [])
     # Ensure corridors included
-    for p in (u'РєРѕСЂРёРґ', u'hall', u'corridor'):
+    for p in (u'корид', u'hall', u'corridor'):
         if p not in apt_pats:
             apt_pats.append(p)
     apt_rx = domain.compile_patterns(apt_pats)
 
     pub_pats = list(rules.get('entrance_public_room_name_patterns', constants.DEFAULT_PUBLIC_PATTERNS) or [])
     # Remove apartments corridors from public exclusion if present
-    pub_pats = [p for p in pub_pats if p and (u'РєРѕСЂРёРґ' not in p) and (u'hall' not in p)]
+    pub_pats = [p for p in pub_pats if p and (u'корид' not in p) and (u'hall' not in p)]
     public_rx = domain.compile_patterns(pub_pats)
 
     rooms = domain.filter_rooms(raw_rooms, rules, apt_rx, public_rx, wet_rx, kitchen_rx, exclude_rx)
@@ -98,7 +98,7 @@ def run(doc, output):
         LAST_ROOM_COUNT = None
 
     if not rooms:
-        alert('РќРµС‚ РїРѕРґС…РѕРґСЏС‰РёС… РїРѕРјРµС‰РµРЅРёР№ (РёСЃРєР»СЋС‡РµРЅС‹ РєСѓС…РЅРё Рё СЃР°РЅСѓР·Р»С‹).')
+        alert('Нет подходящих помещений (исключены кухни и санузлы).')
         return
 
     openings_cache = {}
@@ -121,14 +121,14 @@ def run(doc, output):
     sym_flags[sid] = (is_wp, is_ol)
     strict_hosting_mode = not is_ol
     if is_ol:
-        output.print_md(u'**Р’РЅРёРјР°РЅРёРµ:** С‚РёРї СЂРѕР·РµС‚РєРё OneLevelBased вЂ” СЂР°Р·РјРµС‰РµРЅРёРµ Р±СѓРґРµС‚ Р±РµР· С…РѕСЃС‚Р°.')
+        output.print_md(u'**Внимание:** тип розетки OneLevelBased — размещение будет без хоста.')
 
     sp_cache = {}
     pending = []
     created = 0
     boundary_opts = DB.SpatialElementBoundaryOptions()
 
-    with adapters.create_progress_bar('01. РћР±С‰РёРµ СЂРѕР·РµС‚РєРё...', len(rooms)) as pb:
+    with adapters.create_progress_bar('01. Общие розетки...', len(rooms)) as pb:
         for i, r in enumerate(rooms):
             if pb.cancelled: break
             pb.update_progress(i, pb.max_value)
@@ -177,6 +177,7 @@ def run(doc, output):
         c0, _, _, _, _, _, _ = adapters.place_socket_batch(doc, link_inst, t, pending, sym_flags, sp_cache, comment_value, strict_hosting=strict_hosting_mode)
         created += c0
 
-    output.print_md(u'Р“РѕС‚РѕРІРѕ. РЎРѕР·РґР°РЅРѕ СЂРѕР·РµС‚РѕРє: **{0}**'.format(created))
+    output.print_md(u'Готово. Создано розеток: **{0}**'.format(created))
     return created
+
 

@@ -18,7 +18,7 @@ from utils_units import mm_to_ft
 
 
 def run(doc, output):
-    output.print_md('# 06. Р РѕР·РµС‚РєРё: РЎР»Р°Р±РѕС‚РѕС‡РєР° (РґРѕРјРѕС„РѕРЅ + СЂРѕСѓС‚РµСЂ)')
+    output.print_md('# 06. Розетки: Слаботочка (домофон + роутер)')
 
     rules = adapters.get_rules()
     cfg = adapters.get_config()
@@ -51,7 +51,7 @@ def run(doc, output):
     sym_intercom, _, _ = adapters.pick_socket_symbol(doc, cfg, intercom_types, cache_prefix='socket_intercom')
     sym_router, _, _ = adapters.pick_socket_symbol(doc, cfg, router_types, cache_prefix='socket_router')
     if not sym_intercom or not sym_router:
-        alert('РќРµ РЅР°Р№РґРµРЅ С‚РёРї СЂРѕР·РµС‚РєРё РґР»СЏ СЃР»Р°Р±РѕС‚РѕС‡РєРё (РґРѕРјРѕС„РѕРЅ/СЂРѕСѓС‚РµСЂ). РџСЂРѕРІРµСЂСЊС‚Рµ config/rules.default.json.')
+        alert('Не найден тип розетки для слаботочки (домофон/роутер). Проверьте config/rules.default.json.')
         return
 
     try:
@@ -63,7 +63,7 @@ def run(doc, output):
     except Exception:
         pass
 
-    link_inst = adapters.select_link_instance(doc, 'Р’С‹Р±РµСЂРёС‚Рµ СЃРІСЏР·СЊ РђР ')
+    link_inst = adapters.select_link_instance(doc, 'Выберите связь АР')
     if not link_inst:
         return
     link_doc = adapters.get_link_doc(link_inst)
@@ -77,7 +77,7 @@ def run(doc, output):
     except Exception:
         LAST_ROOM_COUNT = None
     if not rooms:
-        alert('Rooms РІ СЃРІСЏР·Рё РђР  РЅРµ РЅР°Р№РґРµРЅС‹.')
+        alert('Rooms в связи АР не найдены.')
         return
 
     doors = []
@@ -92,7 +92,7 @@ def run(doc, output):
     cabinet_keys = rules.get('low_voltage_cabinet_keywords', constants.CABINET_KEYWORDS)
     
     # Priority for Router placement: Hallway
-    hallway_keys = ['РїСЂРёС…РѕР¶', 'С…РѕР»Р»', 'hall', 'corridor', 'РєРѕСЂРёРґРѕСЂ']
+    hallway_keys = ['прихож', 'холл', 'hall', 'corridor', 'коридор']
 
     intercom_pts = []
     cabinet_pts = []
@@ -114,7 +114,7 @@ def run(doc, output):
         pass
 
     if (not intercom_pts) and (not cabinet_pts) and (not doors):
-        alert('Р’ РђР  РЅРµ РЅР°Р№РґРµРЅС‹ РјР°СЂРєРµСЂС‹ "РґРѕРјРѕС„РѕРЅ" Рё/РёР»Рё "С€РєР°С„/РєРѕСЂРѕР±РєР° РЎРЎ" (TextNote/Tag/СЌР»РµРјРµРЅС‚С‹), Рё РґРІРµСЂРё РЅРµ РЅР°Р№РґРµРЅС‹.')
+        alert('В АР не найдены маркеры "домофон" и/или "шкаф/коробка СС" (TextNote/Tag/элементы), и двери не найдены.')
         return
 
     t = adapters.get_total_transform(link_inst)
@@ -141,7 +141,7 @@ def run(doc, output):
 
     max_wall_dist_ft = mm_to_ft(rules.get('ac_wall_search_max_dist_mm', constants.DEFAULT_MAX_WALL_DIST_MM) or constants.DEFAULT_MAX_WALL_DIST_MM)
 
-    with forms.ProgressBar(title='06. РЎР»Р°Р±РѕС‚РѕС‡РєР°...', cancellable=True) as pb:
+    with forms.ProgressBar(title='06. Слаботочка...', cancellable=True) as pb:
         pb.max_value = len(rooms)
         for i, room in enumerate(rooms):
             if pb.cancelled:
@@ -295,6 +295,7 @@ def run(doc, output):
         except Exception:
             log_exception()
 
-    output.print_md('## Р РµР·СѓР»СЊС‚Р°С‚')
-    output.print_md('- РЎРѕР·РґР°РЅРѕ СЂРѕР·РµС‚РѕРє (СЃР»Р°Р±РѕС‚РѕС‡РєР°): **{0}**'.format(placed_total))
+    output.print_md('## Результат')
+    output.print_md('- Создано розеток (слаботочка): **{0}**'.format(placed_total))
+
 

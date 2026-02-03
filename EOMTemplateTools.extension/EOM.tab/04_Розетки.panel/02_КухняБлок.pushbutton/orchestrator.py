@@ -24,7 +24,7 @@ TOOL_VERSION = '0.1'
 
 def _collect_fridge_by_visibility_param(link_doc):
     pts = []
-    fridge_keywords = [u'С…РѕР»РѕРґРёР»СЊРЅРёРє', u'С…РѕР»РѕРґ', u'fridge', u'refriger']
+    fridge_keywords = [u'холодильник', u'холод', u'fridge', u'refriger']
     bics = [
         DB.BuiltInCategory.OST_GenericModel,
         DB.BuiltInCategory.OST_SpecialityEquipment,
@@ -71,7 +71,7 @@ def _collect_kitchen_unit_elements_by_room(link_doc, rules):
         return {}
 
     unit_keys = rules.get('kitchen_unit_element_keywords', None) or [
-        u'РєСѓС…РЅ', u'СЃС‚РѕР»РµС€', u'РіР°СЂРЅРёС‚', u'kitchen', u'counter', u'worktop'
+        u'кухн', u'столеш', u'гарнит', u'kitchen', u'counter', u'worktop'
     ]
     bics = [
         DB.BuiltInCategory.OST_Furniture,
@@ -331,7 +331,7 @@ def _clamp_unit_candidate_to_unit_elems(cand, unit_elems, max_wall_dist_ft, end_
 
 
 def run(doc, output):
-    output.print_md('# 02. РљСѓС…РЅСЏ: Р“Р°СЂРЅРёС‚СѓСЂ + РҐРѕР»РѕРґРёР»СЊРЅРёРє + РџРµСЂРёРјРµС‚СЂ (Р’СЃРµРіРѕ 4)')
+    output.print_md('# 02. Кухня: Гарнитур + Холодильник + Периметр (Всего 4)')
 
     rules = config_loader.load_rules()
     cfg = script.get_config()
@@ -341,7 +341,7 @@ def run(doc, output):
     comment_value_fridge = '{0}:SOCKET_FRIDGE'.format(comment_tag)
     comment_value_general = '{0}:SOCKET_KITCHEN_GENERAL'.format(comment_tag)
 
-    kitchen_patterns = rules.get('kitchen_room_name_patterns', None) or [u'РєСѓС…РЅСЏ', u'kitchen']
+    kitchen_patterns = rules.get('kitchen_room_name_patterns', None) or [u'кухня', u'kitchen']
     kitchen_rx = su._compile_patterns(kitchen_patterns)
 
     # Max 4 sockets total as per new requirement
@@ -383,10 +383,10 @@ def run(doc, output):
 
     fams = rules.get('family_type_names', {})
     prefer_unit = fams.get('socket_kitchen_unit') or (
-        u'TSL_EF_Р _РћРџ_РЎ_IP20_Р’СЃС‚СЂ_1P+N+PE_2Рј : TSL_EF_Р _РћРџ_РЎ_IP20_Р’СЃС‚СЂ_1P+N+PE_2Рј'
+        u'TSL_EF_Р_ОП_С_IP20_Встр_1P+N+PE_2м : TSL_EF_Р_ОП_С_IP20_Встр_1P+N+PE_2м'
     )
     if isinstance(prefer_unit, (list, tuple)):
-        prefer_unit = sorted(prefer_unit, key=lambda x: (0 if u'_2Рј' in (x or u'') else 1))
+        prefer_unit = sorted(prefer_unit, key=lambda x: (0 if u'_2м' in (x or u'') else 1))
 
     # Helper to pick symbols
     def _pick_sym(prefer_list, desc):
@@ -407,10 +407,10 @@ def run(doc, output):
 
     sym_unit, sym_unit_lbl = _pick_sym(prefer_unit, 'unit')
     if not sym_unit:
-        alert('РќРµ РЅР°Р№РґРµРЅ С‚РёРї СЂРѕР·РµС‚РєРё РґР»СЏ РєСѓС…РЅРё (РіР°СЂРЅРёС‚СѓСЂ).')
+        alert('Не найден тип розетки для кухни (гарнитур).')
         return
 
-    prefer_fridge = fams.get('socket_kitchen_fridge') or (u'TSL_EF_Р _РћРџ_РЎ_IP20_Р’СЃС‚СЂ_1P+N+PE')
+    prefer_fridge = fams.get('socket_kitchen_fridge') or (u'TSL_EF_Р_ОП_С_IP20_Встр_1P+N+PE')
     sym_fridge, sym_fridge_lbl = _pick_sym(prefer_fridge, 'fridge')
     if not sym_fridge: sym_fridge = sym_unit
 
@@ -418,7 +418,7 @@ def run(doc, output):
     sym_general, sym_general_lbl = _pick_sym(prefer_general, 'general')
     if not sym_general: sym_general = sym_fridge
 
-    link_inst = su._select_link_instance_ru(doc, 'Р’С‹Р±РµСЂРёС‚Рµ СЃРІСЏР·СЊ РђР ')
+    link_inst = su._select_link_instance_ru(doc, 'Выберите связь АР')
     if not link_inst: return
     link_doc = link_reader.get_link_doc(link_inst)
     if not link_doc: return
@@ -436,7 +436,7 @@ def run(doc, output):
 
     unit_elems_by_room = _collect_kitchen_unit_elements_by_room(link_doc, rules)
 
-    output.print_md('РњРѕР№РєРё: **{0}**; РџР»РёС‚С‹: **{1}**; РҐРѕР»РѕРґРёР»СЊРЅРёРєРё: **{2}**'.format(
+    output.print_md('Мойки: **{0}**; Плиты: **{1}**; Холодильники: **{2}**'.format(
         len(sinks_all or []), len(stoves_all or []), len(fridges_all or [])))
 
     # Rooms selection
@@ -460,7 +460,7 @@ def run(doc, output):
     except Exception:
         LAST_ROOM_COUNT = None
     if not rooms:
-        alert('РќРµС‚ РїРѕРјРµС‰РµРЅРёР№ РєСѓС…РЅРё.')
+        alert('Нет помещений кухни.')
         return
 
     host_sockets = adapters.collect_host_socket_instances(doc)
@@ -484,7 +484,7 @@ def run(doc, output):
     created = created_face = created_wp = created_pt = 0
     skipped = 0
 
-    with forms.ProgressBar(title='02. РљСѓС…РЅСЏ Р‘Р»РѕРє + РџРµСЂРёРјРµС‚СЂ (4С€С‚)...', cancellable=True) as pb:
+    with forms.ProgressBar(title='02. Кухня Блок + Периметр (4шт)...', cancellable=True) as pb:
         pb.max_value = len(rooms)
         for i, room in enumerate(rooms):
             if pb.cancelled: break
@@ -692,6 +692,7 @@ def run(doc, output):
         c, _, _, _, _, _, _ = su._place_socket_batch(doc, link_inst, t, pending_general, sym_flags, sp_cache, comment_value_general)
         created += c
 
-    output.print_md('РЎРѕР·РґР°РЅРѕ СЂРѕР·РµС‚РѕРє: **{0}**'.format(created))
+    output.print_md('Создано розеток: **{0}**'.format(created))
     return created
+
 

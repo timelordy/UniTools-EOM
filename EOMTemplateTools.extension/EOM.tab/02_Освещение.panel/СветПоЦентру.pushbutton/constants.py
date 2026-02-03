@@ -2,6 +2,8 @@
 
 ROOM_MIN_WALL_CLEAR_FT = 0.0
 
+L_SHAPE_TWO_LIGHTS_AREA_M2 = 10.0
+
 # NOTE: Linked-room geometry APIs (Room.GetBoundarySegments / Room.IsPointInRoom)
 # are known to hard-crash Revit on some models. Keep these OFF by default.
 USE_BOUNDARY_ROOM_CENTER = False

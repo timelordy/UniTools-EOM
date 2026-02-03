@@ -5,6 +5,7 @@ from pyrevit import DB
 from utils_units import mm_to_ft
 import constants
 
+SQFT_TO_SQM = 0.092903
 
 def _are_collinear(p1, p2, p3, tolerance=0.01):
     """Check if three points are collinear."""
@@ -153,6 +154,79 @@ def _get_l_shape_intersection_center(boundary_pts, fallback_z):
         z = fallback_z
     
     return DB.XYZ(cx, cy, z)
+
+
+def _get_l_shape_rect_centers(boundary_pts, fallback_z):
+    """
+    For 6-vertex L-shaped rooms, return centers of the two rectangles
+    that form the "L" (arms).
+
+    Returns list[XYZ] or None.
+    """
+    if not boundary_pts or len(boundary_pts) != 6:
+        return None
+
+    try:
+        xs = sorted(set(round(float(p.X), 3) for p in boundary_pts))
+        ys = sorted(set(round(float(p.Y), 3) for p in boundary_pts))
+    except Exception:
+        return None
+
+    # L-shape should have exactly 3 unique X and 3 unique Y values
+    if len(xs) != 3 or len(ys) != 3:
+        return None
+
+    x0, x1, x2 = xs
+    y0, y1, y2 = ys
+
+    outer_corners = {(x0, y0), (x0, y2), (x2, y0), (x2, y2)}
+    pt_coords = {(round(float(p.X), 3), round(float(p.Y), 3)) for p in boundary_pts}
+
+    notch_corners = outer_corners - pt_coords
+    if len(notch_corners) != 1:
+        return None
+
+    nx, ny = list(notch_corners)[0]
+
+    # Horizontal bar spans full width; choose top or bottom depending on notch Y.
+    if ny == y0:
+        hy0, hy1 = y1, y2
+    else:
+        hy0, hy1 = y0, y1
+
+    # Vertical bar spans full height; choose left or right depending on notch X.
+    if nx == x0:
+        vx0, vx1 = x1, x2
+    else:
+        vx0, vx1 = x0, x1
+
+    try:
+        z = float(boundary_pts[0].Z)
+    except Exception:
+        z = fallback_z
+
+    c_h = DB.XYZ((x0 + x2) / 2.0, (hy0 + hy1) / 2.0, z)
+    c_v = DB.XYZ((vx0 + vx1) / 2.0, (y0 + y2) / 2.0, z)
+
+    # Guard against accidental duplicates
+    try:
+        if abs(c_h.X - c_v.X) < 0.001 and abs(c_h.Y - c_v.Y) < 0.001:
+            return [c_h]
+    except Exception:
+        pass
+
+    return [c_h, c_v]
+
+
+def _room_area_sqm(room):
+    """Return room area in square meters (m^2) or None."""
+    try:
+        area_ft2 = getattr(room, 'Area', None)
+        if area_ft2 is None:
+            return None
+        return float(area_ft2) * SQFT_TO_SQM
+    except Exception:
+        return None
 
 
 def norm(s):
@@ -416,6 +490,7 @@ def get_room_centers_multi(room):
 
     Logic:
     - Corridors: Linear array (spacing ~2.5m / 8.2ft).
+    - L-shape (area > threshold): Two centers for the two rectangles.
     - Others: Single center point.
     """
 
@@ -424,6 +499,26 @@ def get_room_centers_multi(room):
         if pts:
             return pts
         # Fallback to single center if linear calculation failed or room too small
+
+    # L-shape: two centers for large areas
+    try:
+        boundary_pts = _get_room_boundary_points(room)
+        if boundary_pts and len(boundary_pts) == 6:
+            area_sqm = _room_area_sqm(room)
+            threshold = getattr(constants, 'L_SHAPE_TWO_LIGHTS_AREA_M2', 10.0)
+            if area_sqm is not None and area_sqm > threshold:
+                fallback_z = 0.0
+                try:
+                    bb = room.get_BoundingBox(None)
+                    if bb:
+                        fallback_z = bb.Min.Z
+                except Exception:
+                    pass
+                l_pts = _get_l_shape_rect_centers(boundary_pts, fallback_z)
+                if l_pts:
+                    return l_pts
+    except Exception:
+        pass
 
     c = get_room_center_link(room)
     return [c] if c else []

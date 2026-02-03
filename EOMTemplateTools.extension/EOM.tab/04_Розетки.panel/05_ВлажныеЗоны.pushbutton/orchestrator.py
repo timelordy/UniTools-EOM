@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import time
 from pyrevit import DB, forms, script
@@ -18,7 +18,7 @@ from utils_units import mm_to_ft, ft_to_mm
 
 
 def run(doc, output):
-    output.print_md('# 05. Санузлы/Ванные/Постирочные')
+    output.print_md('# 05. РЎР°РЅСѓР·Р»С‹/Р’Р°РЅРЅС‹Рµ/РџРѕСЃС‚РёСЂРѕС‡РЅС‹Рµ')
 
     rules = adapters.get_rules()
     cfg = adapters.get_config()
@@ -70,11 +70,11 @@ def run(doc, output):
         if sym:
             try: sym_lbl = adapters.format_family_type(sym)
             except Exception: sym_lbl = None
-            output.print_md(u'**Внимание:** выбранный тип розетки не поддерживает размещение по грани/стене. Будет использован OneLevel/WorkPlane режим, если доступно.')
+            output.print_md(u'**Р’РЅРёРјР°РЅРёРµ:** РІС‹Р±СЂР°РЅРЅС‹Р№ С‚РёРї СЂРѕР·РµС‚РєРё РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚ СЂР°Р·РјРµС‰РµРЅРёРµ РїРѕ РіСЂР°РЅРё/СЃС‚РµРЅРµ. Р‘СѓРґРµС‚ РёСЃРїРѕР»СЊР·РѕРІР°РЅ OneLevel/WorkPlane СЂРµР¶РёРј, РµСЃР»Рё РґРѕСЃС‚СѓРїРЅРѕ.')
         else:
-            alert('Не найден тип розетки для санузлов.')
+            alert('РќРµ РЅР°Р№РґРµРЅ С‚РёРї СЂРѕР·РµС‚РєРё РґР»СЏ СЃР°РЅСѓР·Р»РѕРІ.')
             if top10:
-                output.print_md('Доступные варианты:')
+                output.print_md('Р”РѕСЃС‚СѓРїРЅС‹Рµ РІР°СЂРёР°РЅС‚С‹:')
                 for x in top10:
                     output.print_md('- {0}'.format(x))
             return
@@ -86,7 +86,7 @@ def run(doc, output):
     except Exception:
         pass
 
-    link_inst = adapters.select_link_instance(doc, u'Выберите связь АР')
+    link_inst = adapters.select_link_instance(doc, u'Р’С‹Р±РµСЂРёС‚Рµ СЃРІСЏР·СЊ РђР ')
     if not link_inst:
         return
     link_doc = adapters.get_link_doc(link_inst)
@@ -105,8 +105,14 @@ def run(doc, output):
             continue
         rooms.append(r)
 
+    global LAST_ROOM_COUNT
+    try:
+        LAST_ROOM_COUNT = len(rooms)
+    except Exception:
+        LAST_ROOM_COUNT = None
+
     if not rooms:
-        alert('Нет помещений санузлов (по паттернам).')
+        alert('РќРµС‚ РїРѕРјРµС‰РµРЅРёР№ СЃР°РЅСѓР·Р»РѕРІ (РїРѕ РїР°С‚С‚РµСЂРЅР°Рј).')
         return
 
     # Collect fixtures
@@ -119,13 +125,13 @@ def run(doc, output):
             pass
 
     fixtures_all = []
-    wm_kws = rules.get('washing_machine_keywords') or [u'стирал', u'washing', u'machine']
+    wm_kws = rules.get('washing_machine_keywords') or [u'СЃС‚РёСЂР°Р»', u'washing', u'machine']
     fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, wm_kws, bics_fixtures, fixture_kind='wm'))
-    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'раковин', u'мойк', u'sink', u'умывал'], bics_fixtures, fixture_kind='sink'))
-    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'сушител', u'towel', u'полотен'], bics_fixtures, fixture_kind='rail'))
-    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'бойлер', u'boiler', u'нагреват'], bics_fixtures, fixture_kind='boiler'))
-    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'ванн', u'bath', u'душ', u'shower', u'поддон', u'кабин', u'джакуз'], bics_fixtures, fixture_kind='bath'))
-    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'унитаз', u'toilet', u'wc', u'биде'], bics_fixtures, fixture_kind='toilet'))
+    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'СЂР°РєРѕРІРёРЅ', u'РјРѕР№Рє', u'sink', u'СѓРјС‹РІР°Р»'], bics_fixtures, fixture_kind='sink'))
+    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'СЃСѓС€РёС‚РµР»', u'towel', u'РїРѕР»РѕС‚РµРЅ'], bics_fixtures, fixture_kind='rail'))
+    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'Р±РѕР№Р»РµСЂ', u'boiler', u'РЅР°РіСЂРµРІР°С‚'], bics_fixtures, fixture_kind='boiler'))
+    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'РІР°РЅРЅ', u'bath', u'РґСѓС€', u'shower', u'РїРѕРґРґРѕРЅ', u'РєР°Р±РёРЅ', u'РґР¶Р°РєСѓР·'], bics_fixtures, fixture_kind='bath'))
+    fixtures_all.extend(adapters.collect_fixture_candidates(link_doc, [u'СѓРЅРёС‚Р°Р·', u'toilet', u'wc', u'Р±РёРґРµ'], bics_fixtures, fixture_kind='toilet'))
 
     door_pts = adapters.collect_door_points(link_doc)
 
@@ -171,7 +177,7 @@ def run(doc, output):
         except: rnm = u''
         skipped_details.append({'room_id': rid, 'room_name': rnm, 'reason': reason, 'details': details or u''})
 
-    with forms.ProgressBar(title='05. Санузлы...', cancellable=True) as pb:
+    with forms.ProgressBar(title='05. РЎР°РЅСѓР·Р»С‹...', cancellable=True) as pb:
         pb.max_value = len(rooms)
         for i, room in enumerate(rooms):
             if pb.cancelled:
@@ -181,7 +187,7 @@ def run(doc, output):
             segs = domain.get_wall_segments(room, link_doc)
             if not segs:
                 skipped += 1
-                _push_skip(room, 'segs', u'нет сегментов стен')
+                _push_skip(room, 'segs', u'РЅРµС‚ СЃРµРіРјРµРЅС‚РѕРІ СЃС‚РµРЅ')
                 continue
 
             base_z = su._room_level_elevation_ft(room, link_doc)
@@ -205,13 +211,13 @@ def run(doc, output):
 
             if existing_cnt >= total_target:
                 skipped += 1
-                _push_skip(room, 'full', u'уже {0}/{1} розеток'.format(int(existing_cnt), int(total_target)))
+                _push_skip(room, 'full', u'СѓР¶Рµ {0}/{1} СЂРѕР·РµС‚РѕРє'.format(int(existing_cnt), int(total_target)))
                 continue
             
             need = max(0, int(total_target) - int(existing_cnt))
             if need <= 0:
                 skipped += 1
-                _push_skip(room, 'full', u'уже {0}/{1} розеток'.format(int(existing_cnt), int(total_target)))
+                _push_skip(room, 'full', u'СѓР¶Рµ {0}/{1} СЂРѕР·РµС‚РѕРє'.format(int(existing_cnt), int(total_target)))
                 continue
 
             fixtures_in_room = domain.fixtures_in_room(fixtures_all, room)
@@ -219,7 +225,7 @@ def run(doc, output):
             
             if not candidates:
                 skipped += 1
-                _push_skip(room, 'candidates', u'нет подходящих точек')
+                _push_skip(room, 'candidates', u'РЅРµС‚ РїРѕРґС…РѕРґСЏС‰РёС… С‚РѕС‡РµРє')
                 continue
                 
             candidates.sort(key=lambda x: x.get('priority', 9))
@@ -368,8 +374,8 @@ def run(doc, output):
             })
 
     output.print_md(
-        'Тип: **{0}**\n\nПодготовлено: **{1}**\nСоздано: **{2}** (Face: {3}, WorkPlane: {4}, Point: {5})\nПропущено: **{6}**'.format(
-            sym_lbl or u'<Розетка>', prepared, created, created_face, created_wp, created_pt, skipped
+        'РўРёРї: **{0}**\n\nРџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ: **{1}**\nРЎРѕР·РґР°РЅРѕ: **{2}** (Face: {3}, WorkPlane: {4}, Point: {5})\nРџСЂРѕРїСѓС‰РµРЅРѕ: **{6}**'.format(
+            sym_lbl or u'<Р РѕР·РµС‚РєР°>', prepared, created, created_face, created_wp, created_pt, skipped
         )
     )
 
@@ -377,16 +383,16 @@ def run(doc, output):
         okc = len([x for x in validation if x.get('status') == 'ok'])
         failc = len([x for x in validation if x.get('status') == 'fail'])
         missc = len([x for x in validation if x.get('status') == 'missing'])
-        output.print_md('Проверка: OK=**{0}**, FAIL=**{1}**, MISSING=**{2}**'.format(okc, failc, missc))
+        output.print_md('РџСЂРѕРІРµСЂРєР°: OK=**{0}**, FAIL=**{1}**, MISSING=**{2}**'.format(okc, failc, missc))
         if failc or missc:
-            output.print_md('Нарушения:')
+            output.print_md('РќР°СЂСѓС€РµРЅРёСЏ:')
             for x in validation:
                 st = x.get('status')
                 if st == 'ok': continue
                 rid = x.get('room_id')
                 rnm = x.get('room_name')
                 if st == 'missing':
-                    output.print_md('- room #{0} {1}: не найден созданный экземпляр (tag={2})'.format(rid, rnm, comment_value))
+                    output.print_md('- room #{0} {1}: РЅРµ РЅР°Р№РґРµРЅ СЃРѕР·РґР°РЅРЅС‹Р№ СЌРєР·РµРјРїР»СЏСЂ (tag={2})'.format(rid, rnm, comment_value))
                 else:
                     output.print_md('- id {0} / room #{1} {2}: height={3}, on_wall={4}'.format(
                         x.get('id'), rid, rnm,
@@ -394,15 +400,16 @@ def run(doc, output):
                     ))
 
     if skipped:
-        output.print_md('Пропущенные (всего): {}'.format(skipped))
+        output.print_md('РџСЂРѕРїСѓС‰РµРЅРЅС‹Рµ (РІСЃРµРіРѕ): {}'.format(skipped))
 
     if skipped_details:
-        output.print_md('Пропущенные помещения (первые {0}):'.format(len(skipped_details)))
+        output.print_md('РџСЂРѕРїСѓС‰РµРЅРЅС‹Рµ РїРѕРјРµС‰РµРЅРёСЏ (РїРµСЂРІС‹Рµ {0}):'.format(len(skipped_details)))
         for x in skipped_details:
             output.print_md('- room #{0} **{1}**: {2}{3}'.format(
                 x.get('room_id'), x.get('room_name') or u'',
                 x.get('reason') or u'',
-                (u' — ' + x.get('details')) if x.get('details') else u''
+                (u' вЂ” ' + x.get('details')) if x.get('details') else u''
             ))
         if skipped_details_more[0]:
-            output.print_md('- …и еще пропущено: **{0}** (увеличьте wet_debug_skipped_rooms_limit)'.format(int(skipped_details_more[0])))
+            output.print_md('- вЂ¦Рё РµС‰Рµ РїСЂРѕРїСѓС‰РµРЅРѕ: **{0}** (СѓРІРµР»РёС‡СЊС‚Рµ wet_debug_skipped_rooms_limit)'.format(int(skipped_details_more[0])))
+

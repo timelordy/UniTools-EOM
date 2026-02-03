@@ -53,6 +53,7 @@ TOOL_KEY_ALIASES = {
     'switches': 'switches_doors',
     'sockets_wet': 'wet_zones',
     'sockets_low_voltage': 'low_voltage',
+    'kitchen_general': 'kitchen_block',
 }
 
 
@@ -64,6 +65,7 @@ ROOM_COUNT_TOOLS = set([
     'wet_zones',
     'low_voltage',
     'ac_sockets',
+    'shdup',
 ])
 ROOM_COUNT_TOOL_SUFFIXES = {
     'sockets_general': [':SOCKET_GENERAL'],
@@ -71,12 +73,14 @@ ROOM_COUNT_TOOL_SUFFIXES = {
     'wet_zones': [' (wet)'],
     'low_voltage': [':SOCKET_INTERCOM', ':SOCKET_ROUTER'],
     'ac_sockets': [':SOCKET_AC'],
+    'shdup': [':SHDUP'],
 }
 
 # Session storage for element counts
 _session_counts = {}
 _lift_shaft_count_cache = None
 _room_count_cache = {}
+_room_count_override = {}
 _link_rooms_cache = {}
 
 
@@ -142,6 +146,34 @@ def _get_room_count_override(tool_key):
         return cnt if cnt > 0 else None
     except Exception:
         return None
+
+
+def set_room_count_override(tool_key, count):
+    """Set explicit room count override for current session (non-persistent)."""
+    try:
+        key = normalize_tool_key(tool_key)
+    except Exception:
+        key = tool_key
+    try:
+        cnt = int(float(count))
+    except Exception:
+        cnt = None
+    if cnt is None or cnt <= 0:
+        try:
+            _room_count_override.pop(key, None)
+        except Exception:
+            pass
+        try:
+            _room_count_cache.pop(key, None)
+        except Exception:
+            pass
+        return None
+    try:
+        _room_count_override[key] = int(cnt)
+        _room_count_cache[key] = int(cnt)
+    except Exception:
+        pass
+    return cnt
 
 
 def _get_room_id_from_element(doc, el):
@@ -526,6 +558,8 @@ def _get_room_count(tool_key):
     if override:
         return override
     key = normalize_tool_key(tool_key)
+    if key in _room_count_override:
+        return _room_count_override.get(key)
     if key in _room_count_cache:
         return _room_count_cache.get(key)
     count = _estimate_room_count_for_tool(tool_key)
@@ -1045,7 +1079,12 @@ def report(output, tool_key, count=None):
         tool_key: Tool identifier (e.g., 'sockets_general')
         count: Number of elements created. If None, uses stored count.
     """
+    raw_count = None
     if count is not None:
+        try:
+            raw_count = int(count or 0)
+        except Exception:
+            raw_count = 0
         set_element_count(tool_key, count)
     else:
         try:
@@ -1077,7 +1116,15 @@ def report(output, tool_key, count=None):
     msg = u'Сэкономлено времени: **{0}**'.format(time_str)
     if range_str:
         msg += u' ({0})'.format(range_str)
-    msg += u' (создано элементов: {0})'.format(saved_count)
+    display_count = raw_count if raw_count is not None else saved_count
+    msg += u' (создано элементов: {0})'.format(display_count)
+    if raw_count is not None:
+        try:
+            key = normalize_tool_key(tool_key)
+            if key in ROOM_COUNT_TOOLS and int(saved_count) != int(raw_count):
+                msg += u' (комнат: {0})'.format(saved_count)
+        except Exception:
+            pass
     
     try:
         if output is not None and hasattr(output, 'print_md'):

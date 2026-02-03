@@ -252,6 +252,33 @@ class TestTimeSavingsReport(unittest.TestCase):
             else:
                 os.environ['EOM_ROOM_COUNT_OVERRIDE_AC_SOCKETS'] = old_override
 
+    def test_report_shows_room_count_for_room_tools(self):
+        output = TestMockOutput()
+        try:
+            time_savings.set_room_count_override('sockets_general', 3)
+            result = time_savings.report(output, 'sockets_general', 10)
+            self.assertTrue(result)
+            self.assertEqual(len(output.messages), 1)
+            msg = output.messages[0]
+            self.assertIn(u'создано элементов: 10', msg)
+            self.assertIn(u'комнат: 3', msg)
+        finally:
+            try:
+                time_savings.set_room_count_override('sockets_general', None)
+            except Exception:
+                pass
+
+    def test_room_override_from_code_applies(self):
+        try:
+            time_savings.set_room_count_override('sockets_general', 4)
+            minutes = time_savings.calculate_time_saved('sockets_general', 100)
+            self.assertEqual(minutes, 24.0)
+        finally:
+            try:
+                time_savings.set_room_count_override('sockets_general', None)
+            except Exception:
+                pass
+
     def test_make_room_key(self):
         self.assertEqual(time_savings._make_room_key(None, 12), 'H:12')
         self.assertEqual(time_savings._make_room_key(7, 34), 'L7:34')

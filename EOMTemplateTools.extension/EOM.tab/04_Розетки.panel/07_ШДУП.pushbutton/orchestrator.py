@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import math
 from pyrevit import DB, forms, script
@@ -18,7 +18,7 @@ from utils_units import mm_to_ft, ft_to_mm
 
 
 def run(doc, output):
-    output.print_md('# 07. ШДУП: Ванные')
+    output.print_md('# 07. РЁР”РЈРџ: Р’Р°РЅРЅС‹Рµ')
 
     rules = adapters.get_rules()
     cfg = adapters.get_config()
@@ -39,7 +39,7 @@ def run(doc, output):
 
     sym, sym_lbl = adapters.pick_shdup_symbol(doc, cfg, rules)
     if not sym:
-        alert('Не найден тип ШДУП. Загрузите семейство/тип в проект и повторите.')
+        alert('РќРµ РЅР°Р№РґРµРЅ С‚РёРї РЁР”РЈРџ. Р—Р°РіСЂСѓР·РёС‚Рµ СЃРµРјРµР№СЃС‚РІРѕ/С‚РёРї РІ РїСЂРѕРµРєС‚ Рё РїРѕРІС‚РѕСЂРёС‚Рµ.')
         return
 
     try:
@@ -49,7 +49,7 @@ def run(doc, output):
     except Exception:
         pass
 
-    link_inst = adapters.select_link_instance(doc, 'Выберите связь АР')
+    link_inst = adapters.select_link_instance(doc, 'Р’С‹Р±РµСЂРёС‚Рµ СЃРІСЏР·СЊ РђР ')
     if not link_inst:
         return
     link_doc = adapters.get_link_doc(link_inst)
@@ -70,11 +70,17 @@ def run(doc, output):
             continue
         rooms.append(r)
 
+    global LAST_ROOM_COUNT
+    try:
+        LAST_ROOM_COUNT = len(rooms)
+    except Exception:
+        LAST_ROOM_COUNT = None
+
     if not rooms:
-        alert('Нет подходящих помещений ванной (по паттернам).')
+        alert('РќРµС‚ РїРѕРґС…РѕРґСЏС‰РёС… РїРѕРјРµС‰РµРЅРёР№ РІР°РЅРЅРѕР№ (РїРѕ РїР°С‚С‚РµСЂРЅР°Рј).')
         return
 
-    output.print_md('Найдено помещений ванных: **{0}** (из {1} всего отсканировано)'.format(
+    output.print_md('РќР°Р№РґРµРЅРѕ РїРѕРјРµС‰РµРЅРёР№ РІР°РЅРЅС‹С…: **{0}** (РёР· {1} РІСЃРµРіРѕ РѕС‚СЃРєР°РЅРёСЂРѕРІР°РЅРѕ)'.format(
         len(rooms), len(raw_rooms)
     ))
 
@@ -99,17 +105,17 @@ def run(doc, output):
         tubs_all = adapters.collect_tub_points(link_doc, rules)
         used_tub_fallback = True
 
-    # Собираем унитазы для определения правильного угла ванны
+    # РЎРѕР±РёСЂР°РµРј СѓРЅРёС‚Р°Р·С‹ РґР»СЏ РѕРїСЂРµРґРµР»РµРЅРёСЏ РїСЂР°РІРёР»СЊРЅРѕРіРѕ СѓРіР»Р° РІР°РЅРЅС‹
     toilets_all = adapters.collect_toilet_points(link_doc, rules)
 
-    output.print_md('Раковины: **{0}**{1}; Ванны: **{2}**{3}; Унитазы: **{4}**'.format(
+    output.print_md('Р Р°РєРѕРІРёРЅС‹: **{0}**{1}; Р’Р°РЅРЅС‹: **{2}**{3}; РЈРЅРёС‚Р°Р·С‹: **{4}**'.format(
         len(sinks_all), ' (fallback)' if used_sink_fallback else '',
         len(tubs_all), ' (fallback)' if used_tub_fallback else '',
         len(toilets_all)
     ))
 
     if not sinks_all and not tubs_all:
-        alert('Не найдено ни раковин, ни ванн в связи (AR).')
+        alert('РќРµ РЅР°Р№РґРµРЅРѕ РЅРё СЂР°РєРѕРІРёРЅ, РЅРё РІР°РЅРЅ РІ СЃРІСЏР·Рё (AR).')
         return
 
     try:
@@ -180,14 +186,14 @@ def run(doc, output):
             skip_no_pair += 1
             continue
 
-        # Собираем все сантехприборы в комнате (кроме ванн) для поиска ближайшего
+        # РЎРѕР±РёСЂР°РµРј РІСЃРµ СЃР°РЅС‚РµС…РїСЂРёР±РѕСЂС‹ РІ РєРѕРјРЅР°С‚Рµ (РєСЂРѕРјРµ РІР°РЅРЅ) РґР»СЏ РїРѕРёСЃРєР° Р±Р»РёР¶Р°Р№С€РµРіРѕ
         fixtures_in_room = []
         if sinks:
             fixtures_in_room.extend(sinks)
         if toilets:
             fixtures_in_room.extend(toilets)
 
-        # Найти УГОЛ ванной, ближайший к БЛИЖАЙШЕМУ сантехприбору (раковина или унитаз)
+        # РќР°Р№С‚Рё РЈР“РћР› РІР°РЅРЅРѕР№, Р±Р»РёР¶Р°Р№С€РёР№ Рє Р‘Р›РР–РђР™РЁР•РњРЈ СЃР°РЅС‚РµС…РїСЂРёР±РѕСЂСѓ (СЂР°РєРѕРІРёРЅР° РёР»Рё СѓРЅРёС‚Р°Р·)
         target_tub_pt = best_tb
         tub_corner_pts = []
         if best_tb and (best_tb in tubs_map):
@@ -197,7 +203,7 @@ def run(doc, output):
                 tub_min = tub_item[1]  # min point of bbox
                 tub_max = tub_item[2]  # max point of bbox
                 if tub_min and tub_max:
-                    # 4 угла ванной
+                    # 4 СѓРіР»Р° РІР°РЅРЅРѕР№
                     tub_corner_pts = [
                         DB.XYZ(float(tub_min.X), float(tub_min.Y), float(tub_min.Z)),
                         DB.XYZ(float(tub_max.X), float(tub_min.Y), float(tub_min.Z)),
@@ -211,7 +217,7 @@ def run(doc, output):
             skip_no_segs += 1
             continue
 
-        # Найти угол ванной, ближайший к БЛИЖАЙШЕМУ сантехприбору
+        # РќР°Р№С‚Рё СѓРіРѕР» РІР°РЅРЅРѕР№, Р±Р»РёР¶Р°Р№С€РёР№ Рє Р‘Р›РР–РђР™РЁР•РњРЈ СЃР°РЅС‚РµС…РїСЂРёР±РѕСЂСѓ
         best_corner = None
         best_corner_dist = None
         
@@ -223,7 +229,7 @@ def run(doc, output):
                         best_corner = corner
                         best_corner_dist = dist
         
-        # Используем ближайший угол к сантехприбору
+        # РСЃРїРѕР»СЊР·СѓРµРј Р±Р»РёР¶Р°Р№С€РёР№ СѓРіРѕР» Рє СЃР°РЅС‚РµС…РїСЂРёР±РѕСЂСѓ
         if best_corner:
             target_tub_pt = best_corner
         
@@ -234,20 +240,20 @@ def run(doc, output):
         chosen_p0 = chosen_p1 = chosen_wall = None
         pfinal = None
 
-        # Алгоритм размещения ШДУП:
-        # ШДУП размещается В УГЛУ ВАННОЙ, ближайшем к сантехприбору (раковина/унитаз)
-        # Проецируем этот угол на ближайшую стену
+        # РђР»РіРѕСЂРёС‚Рј СЂР°Р·РјРµС‰РµРЅРёСЏ РЁР”РЈРџ:
+        # РЁР”РЈРџ СЂР°Р·РјРµС‰Р°РµС‚СЃСЏ Р’ РЈР“Р›РЈ Р’РђРќРќРћР™, Р±Р»РёР¶Р°Р№С€РµРј Рє СЃР°РЅС‚РµС…РїСЂРёР±РѕСЂСѓ (СЂР°РєРѕРІРёРЅР°/СѓРЅРёС‚Р°Р·)
+        # РџСЂРѕРµС†РёСЂСѓРµРј СЌС‚РѕС‚ СѓРіРѕР» РЅР° Р±Р»РёР¶Р°Р№С€СѓСЋ СЃС‚РµРЅСѓ
         
         if best_tb and seg_b:
-            # Стена ванны
+            # РЎС‚РµРЅР° РІР°РЅРЅС‹
             chosen = seg_b
             chosen_p0, chosen_p1, chosen_wall = chosen
             
-            # Проекция угла ванны на стену - это точка размещения ШДУП
+            # РџСЂРѕРµРєС†РёСЏ СѓРіР»Р° РІР°РЅРЅС‹ РЅР° СЃС‚РµРЅСѓ - СЌС‚Рѕ С‚РѕС‡РєР° СЂР°Р·РјРµС‰РµРЅРёСЏ РЁР”РЈРџ
             pfinal = domain.closest_point_on_segment_xy(target_tub_pt, chosen_p0, chosen_p1)
         
         elif best_s and seg_s:
-            # Fallback: только раковина (нет ванны)
+            # Fallback: С‚РѕР»СЊРєРѕ СЂР°РєРѕРІРёРЅР° (РЅРµС‚ РІР°РЅРЅС‹)
             chosen = seg_s
             chosen_p0, chosen_p1, chosen_wall = chosen
             pfinal = domain.closest_point_on_segment_xy(best_s, chosen_p0, chosen_p1)
@@ -314,8 +320,8 @@ def run(doc, output):
         created_wp += int(cwp)
         created_pt += int(cpt)
 
-    # Убираем фильтр по symbol_id для валидации, чтобы гарантированно найти созданные элементы
-    # (иногда ID типа может не совпадать или быть неважным для проверки факта создания)
+    # РЈР±РёСЂР°РµРј С„РёР»СЊС‚СЂ РїРѕ symbol_id РґР»СЏ РІР°Р»РёРґР°С†РёРё, С‡С‚РѕР±С‹ РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅРЅРѕ РЅР°Р№С‚Рё СЃРѕР·РґР°РЅРЅС‹Рµ СЌР»РµРјРµРЅС‚С‹
+    # (РёРЅРѕРіРґР° ID С‚РёРїР° РјРѕР¶РµС‚ РЅРµ СЃРѕРІРїР°РґР°С‚СЊ РёР»Рё Р±С‹С‚СЊ РЅРµРІР°Р¶РЅС‹Рј РґР»СЏ РїСЂРѕРІРµСЂРєРё С„Р°РєС‚Р° СЃРѕР·РґР°РЅРёСЏ)
     ids_after, elems_after, _pts_after = adapters.collect_tagged_instances(doc, comment_value, symbol_id=None)
     new_ids = set(ids_after or set()) - set(ids_before or set())
     try:
@@ -387,8 +393,8 @@ def run(doc, output):
             })
 
     output.print_md(
-        'Тип: **{0}**\n\nПомещений обработано: **{1}**\nПодготовлено: **{2}**\nСоздано: **{3}** (Face: {4}, WorkPlane: {5}, Point: {6})\nПропущено: **{7}**'.format(
-            sym_lbl or u'<ШДУП>', len(rooms), prepared, created, created_face, created_wp, created_pt, skipped
+        'РўРёРї: **{0}**\n\nРџРѕРјРµС‰РµРЅРёР№ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ: **{1}**\nРџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ: **{2}**\nРЎРѕР·РґР°РЅРѕ: **{3}** (Face: {4}, WorkPlane: {5}, Point: {6})\nРџСЂРѕРїСѓС‰РµРЅРѕ: **{7}**'.format(
+            sym_lbl or u'<РЁР”РЈРџ>', len(rooms), prepared, created, created_face, created_wp, created_pt, skipped
         )
     )
 
@@ -396,9 +402,9 @@ def run(doc, output):
         okc = len([x for x in validation if x.get('status') == 'ok'])
         failc = len([x for x in validation if x.get('status') == 'fail'])
         missc = len([x for x in validation if x.get('status') == 'missing'])
-        output.print_md('Проверка: OK=**{0}**, FAIL=**{1}**, MISSING=**{2}**'.format(okc, failc, missc))
+        output.print_md('РџСЂРѕРІРµСЂРєР°: OK=**{0}**, FAIL=**{1}**, MISSING=**{2}**'.format(okc, failc, missc))
         if failc or missc:
-            output.print_md('Нарушения:')
+            output.print_md('РќР°СЂСѓС€РµРЅРёСЏ:')
             for x in validation:
                 st = x.get('status')
                 if st == 'ok':
@@ -406,7 +412,7 @@ def run(doc, output):
                 rid = x.get('room_id')
                 rnm = x.get('room_name')
                 if st == 'missing':
-                    output.print_md('- room #{0} {1}: не найден созданный экземпляр (tag={2})'.format(rid, rnm, comment_value))
+                    output.print_md('- room #{0} {1}: РЅРµ РЅР°Р№РґРµРЅ СЃРѕР·РґР°РЅРЅС‹Р№ СЌРєР·РµРјРїР»СЏСЂ (tag={2})'.format(rid, rnm, comment_value))
                 else:
                     iid = x.get('id')
                     output.print_md('- id {0} / room #{1} {2}: height={3}, on_wall={4}, between={5}'.format(
@@ -414,6 +420,7 @@ def run(doc, output):
                     ))
 
     if skipped:
-        output.print_md('Причины пропусков (шт.): fixtures={0}, segs={1}, pair={2}, chosen={3}, geom={4}, vec={5}, dup={6}'.format(
+        output.print_md('РџСЂРёС‡РёРЅС‹ РїСЂРѕРїСѓСЃРєРѕРІ (С€С‚.): fixtures={0}, segs={1}, pair={2}, chosen={3}, geom={4}, vec={5}, dup={6}'.format(
             skip_no_fixtures, skip_no_segs, skip_no_pair, skip_no_chosen, skip_geom, skip_vec, skip_dup
         ))
+

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import sys
 import os
@@ -20,6 +20,11 @@ def main():
     doc = revit.doc
     output = script.get_output()
     created = orchestrator.run(doc, output)
+    try:
+        from time_savings import set_room_count_override
+        set_room_count_override('low_voltage', getattr(orchestrator, 'LAST_ROOM_COUNT', None))
+    except Exception:
+        pass
     report_time_saved(output, 'low_voltage', created)
     try:
         from time_savings import calculate_time_saved, calculate_time_saved_range
@@ -40,3 +45,4 @@ if __name__ == '__main__':
         main()
     except Exception:
         log_exception('Error in 06_Low_Voltage')
+

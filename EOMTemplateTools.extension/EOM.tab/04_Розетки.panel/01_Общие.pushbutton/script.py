@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import sys
 import os
@@ -21,6 +21,11 @@ def main():
     doc = revit.doc
     output = script.get_output()
     created = orchestrator.run(doc, output)
+    try:
+        from time_savings import set_room_count_override
+        set_room_count_override('sockets_general', getattr(orchestrator, 'LAST_ROOM_COUNT', None))
+    except Exception:
+        pass
     if created:
         report_time_saved(output, 'sockets_general', created)
         try:
@@ -43,3 +48,4 @@ if __name__ == '__main__':
         main()
     except Exception:
         log_exception('Error in 01_General')
+

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import os
 import sys
@@ -30,6 +30,12 @@ def main():
     except Exception:
         created = 0
 
+    try:
+        from time_savings import set_room_count_override
+        set_room_count_override('kitchen_block', getattr(orchestrator, 'LAST_ROOM_COUNT', None))
+    except Exception:
+        pass
+
     report_time_saved(output, 'kitchen_block', created)
 
     try:
@@ -48,3 +54,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

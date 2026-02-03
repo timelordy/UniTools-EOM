@@ -417,8 +417,8 @@ function App() {
       <header className="header">
         <div className="header-content">
           <div className="logo">
+            <span className="logo-text">UniTools</span>
             <span className="logo-icon">EOM</span>
-            <span className="logo-text">Hub</span>
           </div>
           <StatusBar status={status} />
         </div>

@@ -53,6 +53,49 @@ def _get_status_file() -> str:
     return os.path.join(_get_temp_root(), "eom_hub_status.json")
 
 
+def _iter_status_candidates() -> list[str]:
+    """Return possible status file locations, preferring current temp root."""
+    candidates: list[str] = []
+    try:
+        temp_root = _get_temp_root()
+    except Exception:
+        temp_root = None
+
+    if temp_root:
+        candidates.append(os.path.join(temp_root, "eom_hub_status.json"))
+        try:
+            for name in os.listdir(temp_root):
+                if len(name) == 36 and name.count("-") == 4:
+                    p = os.path.join(temp_root, name, "eom_hub_status.json")
+                    candidates.append(p)
+        except Exception:
+            pass
+
+    # Fallback: scan root temp for recent status files
+    try:
+        root = tempfile.gettempdir()
+        if root and root != temp_root:
+            candidates.append(os.path.join(root, "eom_hub_status.json"))
+            try:
+                for name in os.listdir(root):
+                    if len(name) == 36 and name.count("-") == 4:
+                        p = os.path.join(root, name, "eom_hub_status.json")
+                        candidates.append(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # De-dup while preserving order
+    seen = set()
+    ordered: list[str] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            ordered.append(c)
+    return ordered
+
+
 def _get_command_file() -> str:
     return os.path.join(_get_temp_root(), "eom_hub_command.txt")
 
@@ -311,23 +354,28 @@ def get_tools_config():
 
 @_expose
 def get_revit_status():
-    status_file = _get_status_file()
-    log(f"get_revit_status: status_file={status_file}")
-    if os.path.exists(status_file):
-        try:
-            with open(status_file, "r", encoding="utf-8") as f:
-                status = json.load(f)
-            age = time.time() - status.get("timestamp", 0)
-            log(f"get_revit_status: status age={age:.2f}s")
-            if age < 10:
-                return {
-                    "connected": True,
-                    "document": status.get("document"),
-                    "documentPath": status.get("documentPath"),
-                    "revitVersion": status.get("revitVersion"),
-                    "sessionId": _get_session_id(),
-                }
-        except: pass
+    checked = []
+    for status_file in _iter_status_candidates():
+        checked.append(status_file)
+        log(f"get_revit_status: status_file={status_file}")
+        if os.path.exists(status_file):
+            try:
+                with open(status_file, "r", encoding="utf-8") as f:
+                    status = json.load(f)
+                age = time.time() - status.get("timestamp", 0)
+                log(f"get_revit_status: status age={age:.2f}s")
+                if age < 10:
+                    return {
+                        "connected": True,
+                        "document": status.get("document"),
+                        "documentPath": status.get("documentPath"),
+                        "revitVersion": status.get("revitVersion"),
+                        "sessionId": _get_session_id(),
+                    }
+            except Exception as e:
+                log(f"get_revit_status ERROR reading {status_file}: {e}")
+                continue
+    log(f"get_revit_status: no recent status in {len(checked)} candidates")
     return {"connected": False, "document": None, "sessionId": _get_session_id()}
 
 
@@ -354,8 +402,8 @@ def run_tool(tool_id: str, job_id: Optional[str] = None):
     # At runtime job_id is always set here.
     assert job_id is not None
 
-    # One command file per job (prevents overwriting when user queues many tools).
-    command_file = _get_command_file_for_job(job_id)
+    # Single command file (UniPlagin-style). Job ID stays in payload and results.
+    command_file = _get_command_file()
     command = f"run:{tool_id}:{job_id}"
 
     # FIX: Clear old legacy result file to prevent reading stale data
@@ -380,6 +428,18 @@ def run_tool(tool_id: str, job_id: Optional[str] = None):
         log(f"Command written successfully")
         if os.path.exists(command_file):
             log(f"Verified: file exists, size={os.path.getsize(command_file)}")
+        # Legacy per-job command file for compatibility with older monitors.
+        try:
+            legacy_command_file = _get_command_file_for_job(job_id)
+            with open(legacy_command_file, "w", encoding="utf-8") as f:
+                f.write(command)
+            try:
+                os.utime(legacy_command_file, None)
+            except Exception:
+                pass
+            log(f"Legacy command file: {legacy_command_file}")
+        except Exception as e:
+            log(f"ERROR writing legacy command file: {e}")
         try:
             queued = {
                 "status": "pending",

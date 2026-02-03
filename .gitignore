@@ -46,3 +46,4 @@ __pycache__/
 
 # pyRevit cache/output (do not commit)
 **/pyrevit_output.txt
+.firecrawl/

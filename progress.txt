@@ -1,2 +1,0 @@
-# Progress: Kitchen Sockets Fix (Revert)
-- Reverted unit_margin back to 100mm as requested

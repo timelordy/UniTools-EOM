@@ -278,7 +278,7 @@ def _get_hub_session_path(session_id):
 def find_hub_exe():
     """Find EOMHub.exe in possible locations."""
     script_dir = _to_unicode(os.path.dirname(__file__))
-    # script_dir = .../EOMTemplateTools.extension/EOM.tab/01_РҐР°Р±.panel/Hub.pushbutton
+    # script_dir = .../EOMTemplateTools.extension/EOM.tab/01_Хаб.panel/Hub.pushbutton
     extension_dir = _to_unicode(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))))
     extensions_dir = _to_unicode(os.path.dirname(extension_dir))
 
@@ -511,7 +511,7 @@ def start_command_monitor(start_thread=True):
                             continue
 
                         # Skip Hub itself
-                        if u"Hub" in base or u"РҐР°Р±" in base:
+                        if u"Hub" in base or u"Хаб" in base:
                             continue
 
                         script_file = _os.path.join(root, u"script.py")
@@ -738,7 +738,7 @@ def start_command_monitor(start_thread=True):
                         "job_id": job_id,
                         "tool_id": tool_id,
                         "status": "running",
-                        "message": u"Р’С‹РїРѕР»РЅСЏРµС‚СЃСЏ РІ Revit...",
+                        "message": u"Выполняется в Revit...",
                         "stats": {"total": 0, "processed": 0, "skipped": 0, "errors": 0},
                         "timestamp": _time.time(),
                     }
@@ -1383,8 +1383,8 @@ def main():
         try:
             from pyrevit import forms
             forms.alert(
-                u"EOMHub.exe РЅРµ РЅР°Р№РґРµРЅ.\n\n"
-                u"РЎРѕР±РµСЂРёС‚Рµ Hub РєРѕРјР°РЅРґРѕР№:\n"
+                u"EOMHub.exe не найден.\n\n"
+                u"Соберите Hub командой:\n"
                 u"cd C:\\Users\\anton\\EOMTemplateTools\\EOMHub\n"
                 u".\\build.ps1"
             )
@@ -1394,6 +1394,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

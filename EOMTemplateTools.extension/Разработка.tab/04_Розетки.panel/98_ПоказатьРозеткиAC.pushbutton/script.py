@@ -24,7 +24,7 @@ def main():
 
     found = adapters.collect_sockets(doc, target_comment)
     if not found:
-        forms.alert('Розетки с меткой {} не найдены.'.format(target_comment))
+        forms.alert('Р РѕР·РµС‚РєРё СЃ РјРµС‚РєРѕР№ {} РЅРµ РЅР°Р№РґРµРЅС‹.'.format(target_comment))
         return
 
     items = [domain.SocketItem(e, doc) for e in found]

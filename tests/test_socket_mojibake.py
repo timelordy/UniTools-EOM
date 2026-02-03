@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 import os
 import io
@@ -10,10 +10,6 @@ SOCKET_DIRS = [
     os.path.join(ROOT, 'EOMTemplateTools.extension', 'EOM.tab', '04_Розетки.panel'),
     os.path.join(ROOT, 'EOMTemplateTools.extension', 'Разработка.tab', '04_Розетки.panel'),
 ]
-
-# Characters that commonly appear when UTF-8 Russian text is mis-decoded
-# as CP1251 and then saved as UTF-8.
-MOJIBAKE_CHARS = u"ЃЌЊЉЍЎЏЂђѓќњљћџўєіїґ"
 
 
 def _iter_socket_files():
@@ -27,23 +23,32 @@ def _iter_socket_files():
                 yield os.path.join(root, name)
 
 
-def _has_mojibake(text):
-    return any(ch in text for ch in MOJIBAKE_CHARS)
+def _check_utf8(path):
+    try:
+        with io.open(path, 'rb') as f:
+            data = f.read()
+    except Exception:
+        return "read_failed"
+    if b'\x00' in data:
+        return "contains_nul_bytes"
+    try:
+        text = data.decode('utf-8', 'replace')
+    except Exception:
+        return "decode_failed"
+    if u'\ufffd' in text:
+        return "invalid_utf8"
+    return None
 
 
 class TestSocketMojibake(unittest.TestCase):
-    def test_no_mojibake_in_socket_plugins(self):
+    def test_socket_plugins_are_valid_utf8(self):
         offenders = []
         for path in _iter_socket_files():
-            try:
-                with io.open(path, 'r', encoding='utf-8') as f:
-                    data = f.read()
-            except Exception:
-                continue
-            if _has_mojibake(data):
-                offenders.append(os.path.relpath(path, ROOT))
+            reason = _check_utf8(path)
+            if reason:
+                offenders.append("{0} ({1})".format(os.path.relpath(path, ROOT), reason))
         if offenders:
-            self.fail("Mojibake detected in socket plugins:\n- " + "\n- ".join(offenders))
+            self.fail("Socket plugin scripts must be UTF-8 without NUL/invalid chars:\n- " + "\n- ".join(offenders))
 
 
 if __name__ == '__main__':

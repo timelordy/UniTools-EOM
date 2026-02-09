@@ -11,6 +11,8 @@ PRD.md
 # Debug/diagnostic data exports
 *.csv
 door_*.json
+debug-*.log
+debug*.log
 
 # Temporary patch/fix scripts
 apply_fix.ps1
@@ -53,9 +55,23 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+htmlcov/
+coverage.xml
+.coverage
 
 # JS
 **/node_modules/
+
+# Build artifacts (do not commit)
+EOMHub/build/
+EOMHub/dist/
+EOMHub/frontend/dist/
+EOMHub/RevitDockablePane/bin/
+EOMHub/RevitDockablePane/obj/
+
+# Local backups
+*.old
+*.old.*
 
 # Local archives
 _archive/

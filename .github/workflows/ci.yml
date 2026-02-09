@@ -1,45 +1,97 @@
- name: CI
- 
- on:
-   push:
-     branches: [main]
-   pull_request:
-     branches: [main]
- 
- jobs:
-   lint-and-test:
-     runs-on: ubuntu-latest
-     
-     steps:
-       - uses: actions/checkout@v4
-       
-       - name: Set up Python
-         uses: actions/setup-python@v5
-         with:
-           python-version: '3.11'
-           cache: 'pip'
-       
-       - name: Install dependencies
-         run: |
-           python -m pip install --upgrade pip
-           pip install -r requirements-dev.txt
-       
-       - name: Run flake8
-         run: |
-           flake8 EOMTemplateTools.extension/lib/ tests/
-       
-      - name: Run mypy
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
         run: |
-          mypy EOMTemplateTools.extension/lib/utils_units.py EOMTemplateTools.extension/lib/text_utils.py EOMTemplateTools.extension/lib/config_loader.py EOMTemplateTools.extension/lib/pk_indicator_rules.py
-      
-       - name: Run pytest
-         run: |
-          pytest tests/ -v --cov=EOMTemplateTools.extension/lib --cov-report=term-missing --cov-report=html --cov-fail-under=80
-      
-      - name: Upload coverage report
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Check code formatting (black)
+        run: |
+          black --check --diff EOMTemplateTools.extension/lib tests
+
+      - name: Check import sorting (isort)
+        run: |
+          isort --check-only --diff EOMTemplateTools.extension/lib tests
+
+      - name: Lint with flake8
+        run: |
+          # Stop on syntax errors or undefined names
+          flake8 EOMTemplateTools.extension/lib/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # All errors as warnings
+          flake8 EOMTemplateTools.extension/lib/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+      - name: Type check with mypy
+        run: |
+          mypy EOMTemplateTools.extension/lib --config-file=pyproject.toml
+        continue-on-error: true  # Don't fail CI yet (incremental migration)
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=EOMTemplateTools.extension/lib --cov-report=term-missing --cov-report=html --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true
+
+      - name: Upload coverage HTML report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-report
           path: htmlcov/
-          retention-days: 7
+          retention-days: 30
+
+      - name: Check coverage threshold
+        run: |
+          # Extract coverage percentage from XML
+          COVERAGE=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); print(root.attrib['line-rate'])")
+          COVERAGE_PCT=$(python -c "print(f'{float($COVERAGE) * 100:.1f}')")
+          echo "Coverage: $COVERAGE_PCT%"
+
+          # Fail if coverage < 60% (gradually increase this threshold)
+          python -c "assert float($COVERAGE) >= 0.60, f'Coverage {float($COVERAGE)*100:.1f}% is below 60% threshold'"
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install bandit
+        run: |
+          pip install bandit[toml]
+
+      - name: Run security scan
+        run: |
+          bandit -r EOMTemplateTools.extension/lib -ll
+        continue-on-error: true

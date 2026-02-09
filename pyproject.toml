@@ -42,12 +42,24 @@
 
 [tool.mypy]
 python_version = "3.8"
+
+# Strict mode settings
 warn_return_any = true
 warn_unused_ignores = true
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
+warn_redundant_casts = true
+warn_unused_configs = true
+no_implicit_optional = true
+strict_equality = true
+
+# Gradually enable strict typing (start with new code)
+disallow_untyped_defs = false  # TODO: enable incrementally per module
+disallow_incomplete_defs = false  # TODO: enable incrementally per module
 check_untyped_defs = true
+
+# Revit API and pyRevit modules are untyped
 ignore_missing_imports = true
+
+# Exclude legacy modules (migrate incrementally)
 exclude = [
     "tests/",
     "socket_utils\\.py$",
@@ -55,3 +67,9 @@ exclude = [
     "placement_engine\\.py$",
     "utils_revit\\.py$",
 ]
+
+# Strict mode for new modules (example - uncomment when ready)
+# [[tool.mypy.overrides]]
+# module = "config_loader"
+# disallow_untyped_defs = true
+# disallow_incomplete_defs = true

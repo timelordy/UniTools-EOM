@@ -1,0 +1,56 @@
+name: Code Quality
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly on Mondays
+  workflow_dispatch:
+
+jobs:
+  quality-report:
+    name: Weekly Quality Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+          pip install radon
+
+      - name: Complexity analysis
+        run: |
+          echo "## Cyclomatic Complexity" > quality-report.md
+          radon cc EOMTemplateTools.extension/lib -a -s >> quality-report.md
+          echo "" >> quality-report.md
+          echo "## Maintainability Index" >> quality-report.md
+          radon mi EOMTemplateTools.extension/lib -s >> quality-report.md
+
+      - name: Count TODO/FIXME
+        run: |
+          echo "" >> quality-report.md
+          echo "## TODO/FIXME Items" >> quality-report.md
+          grep -rn "TODO\|FIXME" EOMTemplateTools.extension/lib --exclude-dir=__pycache__ >> quality-report.md || echo "None" >> quality-report.md
+
+      - name: Lines of code
+        run: |
+          echo "" >> quality-report.md
+          echo "## Lines of Code" >> quality-report.md
+          find EOMTemplateTools.extension/lib -name "*.py" -exec wc -l {} + | tail -1 >> quality-report.md
+
+      - name: Test coverage
+        run: |
+          pytest tests/ --cov=EOMTemplateTools.extension/lib --cov-report=term | tee -a quality-report.md
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-quality-report
+          path: quality-report.md

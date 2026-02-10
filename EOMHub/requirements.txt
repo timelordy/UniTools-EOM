@@ -1,4 +1,4 @@
-# EOM Hub Dependencies
+# UniTools Hub Dependencies
 eel>=0.16.0
 bottle>=0.12.25
 gevent>=23.9.0

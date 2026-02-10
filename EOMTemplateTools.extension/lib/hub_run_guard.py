@@ -1,9 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
-"""Revit run guard helpers (pure Python)."""
+"""Revit run guard хелперы (чистый Python)."""
 
 
 def should_defer_run(has_doc, is_quiescent):
-    """Return True when it is safer to defer tool execution."""
+    """Вернуть True когда безопаснее отложить выполнение инструмента."""
     if not has_doc:
         return True
     if is_quiescent is False:

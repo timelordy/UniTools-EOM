@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 
 import math
-from pyrevit import DB, script
+from pyrevit import DB, script, forms
 import adapters
 import domain
 import constants
@@ -32,11 +32,36 @@ def run(doc, output):
     dedupe_mm = float(rules.get('socket_dedupe_radius_mm', constants.DEDUPE_MM))
     batch_size = int(rules.get('batch_size', constants.BATCH_SIZE) or constants.BATCH_SIZE)
 
+    opening_offset_mm = avoid_door_mm
+    try:
+        default_txt = str(int(round(opening_offset_mm)))
+    except Exception:
+        default_txt = str(avoid_door_mm)
+    try:
+        prompt = u'Отступ от углов/окон/дверей (мм)'
+        title = u'Параметры размещения розеток'
+        user_val = forms.ask_for_string(prompt=prompt, title=title, default=default_txt)
+        if user_val is None:
+            return
+        user_val = user_val.strip()
+        if user_val:
+            try:
+                opening_offset_mm = float(user_val.replace(',', '.'))
+                if opening_offset_mm < 0:
+                    opening_offset_mm = avoid_door_mm
+            except Exception:
+                forms.alert(u'Неверный формат числа. Использую значение по умолчанию: {0} мм'.format(default_txt))
+                opening_offset_mm = avoid_door_mm
+    except Exception:
+        opening_offset_mm = avoid_door_mm
+
     spacing_ft = mm_to_ft(spacing_mm)
     height_ft = mm_to_ft(height_mm)
-    avoid_door_ft = mm_to_ft(avoid_door_mm)
+    avoid_door_ft = mm_to_ft(opening_offset_mm)
     avoid_radiator_ft = mm_to_ft(avoid_radiator_mm)
     dedupe_ft = mm_to_ft(dedupe_mm)
+    window_offset_ft = avoid_door_ft
+    corner_offset_ft = avoid_door_ft
 
     cfg = adapters.get_config()
     fams = rules.get('family_type_names', {})
@@ -76,6 +101,9 @@ def run(doc, output):
     wet_rx = domain.compile_patterns(rules.get('wet_room_name_patterns', constants.DEFAULT_WET_PATTERNS))
     kitchen_rx = domain.compile_patterns(constants.DEFAULT_KITCHEN_PATTERNS)
     exclude_rx = domain.compile_patterns(rules.get('exclude_room_name_patterns', constants.DEFAULT_EXCLUDE_PATTERNS))
+    wardrobe_rx = domain.compile_patterns(rules.get('wardrobe_room_name_patterns', constants.DEFAULT_WARDROBE_PATTERNS))
+    wardrobe_skip_sqm = float(rules.get('wardrobe_skip_area_sqm', constants.WARDROBE_SKIP_AREA_SQM) or constants.WARDROBE_SKIP_AREA_SQM)
+    sliding_rx = domain.compile_patterns(rules.get('sliding_door_name_patterns', constants.DEFAULT_SLIDING_DOOR_PATTERNS))
 
     apt_pats = list(rules.get('entrance_apartment_room_name_patterns', constants.DEFAULT_APARTMENT_PATTERNS) or [])
     # Ensure corridors included
@@ -108,6 +136,33 @@ def run(doc, output):
         radiator_idx = su._XYZIndex(cell_ft=5.0)
         for p in radiator_pts: radiator_idx.add(p.X, p.Y, 0.0)
 
+    sliding_doors = []
+    try:
+        for d in link_reader.iter_doors(link_doc):
+            try:
+                txt = su._elem_text(d)
+            except Exception:
+                txt = u''
+            if not domain.is_sliding_door_text(txt, sliding_rx):
+                continue
+            try:
+                pt = su._door_center_point(d)
+            except Exception:
+                pt = None
+            if pt is None:
+                continue
+            try:
+                w = su._get_opening_width_ft(d, primary_bip=DB.BuiltInParameter.DOOR_WIDTH, fallback_width_mm=900)
+            except Exception:
+                w = None
+            try:
+                half = (float(w) * 0.5) if w else (mm_to_ft(900) * 0.5)
+            except Exception:
+                half = mm_to_ft(900) * 0.5
+            sliding_doors.append((pt, half))
+    except Exception:
+        sliding_doors = []
+
     t = adapters.get_total_transform(link_inst)
     idx = su._XYZIndex(cell_ft=5.0)
 
@@ -136,7 +191,15 @@ def run(doc, output):
             txt_r = su._room_text(r)
             is_hallway_room = domain.is_hallway(txt_r, hallway_rx)
 
-            allowed_path, effective_len_ft = domain.calculate_allowed_path(link_doc, r, boundary_opts, avoid_door_ft, openings_cache)
+            allowed_path, effective_len_ft = domain.calculate_allowed_path(
+                link_doc,
+                r,
+                boundary_opts,
+                avoid_door_ft,
+                openings_cache,
+                window_offset_ft=window_offset_ft,
+                corner_offset_ft=corner_offset_ft,
+            )
 
             if effective_len_ft <= 1e-6: continue
 
@@ -146,10 +209,61 @@ def run(doc, output):
             except: pass
 
             candidates = []
+            if domain.should_skip_wardrobe(room_area_sqm, txt_r, wardrobe_rx, min_area_sqm=wardrobe_skip_sqm):
+                output.print_md(u'Комната: {0}; гардеробная {1:.1f} м² < {2:.1f} м² — розетки не ставятся'.format(
+                    txt_r, float(room_area_sqm or 0.0), float(wardrobe_skip_sqm or 0.0)
+                ))
+                continue
             if is_hallway_room:
                 candidates = domain.generate_candidates_hallway(allowed_path, room_area_sqm)
+                try:
+                    target_count = 1 if room_area_sqm <= 10.0 else 2
+                except Exception:
+                    target_count = len(candidates)
+                summary = domain.format_room_socket_summary(
+                    txt_r,
+                    effective_len_ft,
+                    target_count,
+                    None,
+                    is_hallway=True,
+                    room_area_sqm=room_area_sqm,
+                )
             else:
-                candidates = domain.generate_candidates_general(allowed_path, effective_len_ft, spacing_ft)
+                count_len_ft = effective_len_ft
+                try:
+                    _, count_len_ft = domain.calculate_allowed_path(
+                        link_doc,
+                        r,
+                        boundary_opts,
+                        0.0,
+                        openings_cache,
+                        window_offset_ft=0.0,
+                        corner_offset_ft=0.0,
+                    )
+                except Exception:
+                    count_len_ft = effective_len_ft
+
+                num, step_ft = domain.calc_general_socket_count_and_step_for_lengths(
+                    count_len_ft,
+                    effective_len_ft,
+                    spacing_ft,
+                )
+                candidates = domain.generate_candidates_general_with_count(
+                    allowed_path,
+                    effective_len_ft,
+                    num,
+                )
+                summary = domain.format_room_socket_summary(
+                    txt_r,
+                    count_len_ft,
+                    num,
+                    step_ft,
+                    is_hallway=False,
+                    room_area_sqm=None,
+                )
+
+            if summary:
+                output.print_md(summary)
 
             base_z = su._room_level_elevation_ft(r, link_doc)
 
@@ -159,6 +273,10 @@ def run(doc, output):
 
                 # Radiator check
                 if radiator_idx and radiator_idx.has_near(p_link.X, p_link.Y, 0.0, avoid_radiator_ft):
+                    continue
+
+                # Sliding door check (avoid placing on sliding doors)
+                if sliding_doors and domain.is_point_near_sliding_doors(p_link, sliding_doors, extra_ft=avoid_door_ft):
                     continue
 
                 # Dedupe

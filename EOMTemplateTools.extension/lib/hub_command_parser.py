@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Parse hub command strings into action metadata."""
+"""Парсинг командных строк hub в метаданные действий."""
 
 
 def parse_command(raw):
@@ -11,8 +11,14 @@ def parse_command(raw):
     if not cmd:
         return {"action": None, "tool_id": None, "job_id": None, "mode": None}
 
-    if cmd == "cancel" or cmd.startswith("run:cancel"):
+    if cmd == "cancel":
         return {"action": "cancel", "tool_id": None, "job_id": None, "mode": None}
+
+    if cmd.startswith("run:cancel"):
+        parts = cmd.split(":")
+        job_id = parts[2] if len(parts) >= 3 and parts[2] else None
+        mode = parts[3] if len(parts) >= 4 and parts[3] else None
+        return {"action": "cancel", "tool_id": None, "job_id": job_id, "mode": mode}
 
     if cmd.startswith("run:"):
         parts = cmd.split(":")

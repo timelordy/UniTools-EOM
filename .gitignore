@@ -75,3 +75,9 @@ EOMHub/RevitDockablePane/obj/
 
 # Local archives
 _archive/
+
+# Release/build outputs (generated)
+dist/
+
+# AI/refactoring reports (do not commit)
+docs/REFACTORING_*.md

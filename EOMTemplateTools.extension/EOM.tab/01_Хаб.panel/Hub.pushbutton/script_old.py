@@ -51,20 +51,26 @@ def find_hub_exe():
     script_dir = os.path.dirname(__file__)
     # script_dir = .../EOMTemplateTools.extension/EOM.tab/01_Хаб.panel/Hub.pushbutton
     extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
-    extensions_dir = os.path.dirname(extension_dir)
 
-    possible_paths = [
-        os.path.join(extension_dir, "bin", "EOMHub.exe"),
-        os.path.join(extensions_dir, "EOMHub.exe"),
-        os.path.join(extension_dir, "EOMHub.exe"),
-        os.path.join(script_dir, "EOMHub.exe"),
-        os.path.join(os.environ.get("APPDATA", ""), "pyRevit", "Extensions", "EOMTemplateTools.extension", "bin", "EOMHub.exe"),
-        r"C:\Users\anton\EOMTemplateTools\EOMHub\dist\EOMHub.exe",
-    ]
+    env_override = os.environ.get("EOM_HUB_EXE_PATH")
+    if env_override and os.path.exists(env_override):
+        return env_override
 
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
+    canonical = os.path.join(extension_dir, "bin", "EOMHub.exe")
+    if os.path.exists(canonical):
+        return canonical
+
+    appdata_fallback = os.path.join(
+        os.environ.get("APPDATA", ""),
+        "pyRevit",
+        "Extensions",
+        "EOMTemplateTools.extension",
+        "bin",
+        "EOMHub.exe",
+    )
+    if os.path.exists(appdata_fallback):
+        return appdata_fallback
+
     return None
 
 

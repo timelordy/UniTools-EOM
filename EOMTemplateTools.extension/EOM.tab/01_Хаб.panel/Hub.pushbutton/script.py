@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-"""EOM Hub - Web interface launcher with file-based communication."""
+"""UniTools Hub - Web interface launcher with file-based communication."""
 
 __title__ = "EOM\nHub"
 __author__ = "EOM Team"
@@ -16,6 +16,7 @@ import tempfile
 import re
 import subprocess
 import io
+import socket
 
 try:
     text_type = unicode  # IronPython 2
@@ -68,6 +69,155 @@ _EOM_MONITOR_STARTED = False
 _EOM_HUB_EVENT = None
 _EOM_HUB_HANDLER = None
 _EOM_PROCESS_TOOL = None
+
+HUB_DOCKABLE_PANE_ID = "59F3CD26-2CA0-4D4B-91F3-71B3FBDA2E57"
+HUB_WINDOW_TITLES = (
+    u"UniTools Hub",
+    u"UniTools EOM",
+    u"EOM Hub",
+)
+
+_EOM_DEBUG_LOG_PATH = None
+_LAST_DOCKABLE_ERROR = None
+_DOCKABLE_ALERT_SHOWN = False
+_MERGE_SUMMARY_FALLBACK_WARNED = False
+
+
+def _resolve_debug_log_path():
+    global _EOM_DEBUG_LOG_PATH
+    if _EOM_DEBUG_LOG_PATH:
+        return _EOM_DEBUG_LOG_PATH
+    try:
+        base = os.environ.get("USERPROFILE") or os.environ.get("TEMP") or tempfile.gettempdir()
+    except Exception:
+        base = tempfile.gettempdir()
+    path = os.path.join(base, "eom_debug.log")
+    _EOM_DEBUG_LOG_PATH = path
+    return path
+
+
+def _log_debug(msg):
+    """Write debug messages early in the lifecycle (before monitor starts)."""
+    try:
+        import io as _io
+        from time import strftime
+
+        path = _resolve_debug_log_path()
+        text = _to_unicode(msg)
+        line = u"[{0}] {1}\n".format(strftime("%Y-%m-%d %H:%M:%S"), text)
+        with _io.open(path, "a", encoding="utf-8") as f:
+            f.write(line)
+            try:
+                f.flush()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+_log_debug(u"Hub launcher script loaded from: {0}".format(_to_unicode(__file__)))
+
+
+def _get_revit_version():
+    """Return Revit version number as text, or None."""
+    try:
+        uiapp = __revit__
+        if not uiapp:
+            return None
+        app = getattr(uiapp, "Application", None)
+        if not app:
+            return None
+        version = getattr(app, "VersionNumber", None)
+        if version:
+            return _to_unicode(version)
+    except Exception:
+        return None
+    return None
+
+
+def _get_expected_addin_dir():
+    version = _get_revit_version()
+    if not version:
+        return None
+    try:
+        base = os.environ.get("APPDATA") or ""
+        if not base:
+            return None
+        return os.path.join(base, "Autodesk", "Revit", "Addins", version, "EOMHubDockablePane")
+    except Exception:
+        return None
+
+
+def _prompt_missing_dockable_pane():
+    """Show a one-time alert explaining how to install the dockable pane add-in."""
+    global _DOCKABLE_ALERT_SHOWN
+    if _DOCKABLE_ALERT_SHOWN:
+        return
+    _DOCKABLE_ALERT_SHOWN = True
+
+    version = _get_revit_version()
+    addin_dir = _get_expected_addin_dir()
+    missing_parts = []
+    if addin_dir:
+        try:
+            dll_path = os.path.join(addin_dir, "EOMHub.DockablePane.dll")
+            addin_path = os.path.join(addin_dir, "EOMHub.DockablePane.addin")
+            if not os.path.exists(dll_path):
+                missing_parts.append(u"DLL")
+            if not os.path.exists(addin_path):
+                missing_parts.append(u".addin")
+        except Exception:
+            pass
+
+    lines = [
+        u"Не удалось показать док-панель UniTools Hub внутри Revit.",
+        u"Убедитесь, что аддин EOMHubDockablePane установлен для текущей версии Revit и затем перезапустите Revit.",
+    ]
+    if addin_dir:
+        lines.append(u"Ожидаемая папка: {0}".format(_to_unicode(addin_dir)))
+        if missing_parts:
+            lines.append(u"Отсутствуют файлы: {0}".format(", ".join(missing_parts)))
+    build_hint_version = version or u"2022"
+    lines.append(
+        u"Сборка: dotnet build EOMHub/RevitDockablePane -c Release -p:REVIT_API_PATH=\"C:\\Program Files\\Autodesk\\Revit {0}\"".format(
+            build_hint_version
+        )
+    )
+    lines.append(u"После сборки скопируйте DLL и .addin в указанную папку.")
+    if _LAST_DOCKABLE_ERROR:
+        lines.append(u"Техническая ошибка: {0}".format(_to_unicode(_LAST_DOCKABLE_ERROR)))
+
+    message = u"\n\n".join(lines)
+    _log_debug(message)
+    try:
+        from pyrevit import forms
+
+        forms.alert(message, title=u"UniTools Hub", warn_icon=True)
+    except Exception:
+        pass
+
+
+def _show_dockable_pane():
+    """Try to show the WebView2 dockable pane if the add-in is installed."""
+    global _LAST_DOCKABLE_ERROR
+    try:
+        from Autodesk.Revit.UI import DockablePaneId
+        from System import Guid
+
+        uiapp = __revit__  # pyRevit injects UIApplication
+        if not uiapp:
+            _LAST_DOCKABLE_ERROR = RuntimeError("UIApplication reference is missing")
+            return False
+        pane_id = DockablePaneId(Guid(HUB_DOCKABLE_PANE_ID))
+        pane = uiapp.GetDockablePane(pane_id)
+        if pane:
+            pane.Show()
+            _LAST_DOCKABLE_ERROR = None
+            return True
+    except Exception as e:
+        _LAST_DOCKABLE_ERROR = e
+        _log_debug(u"DockablePane show failed: {0}".format(_to_unicode(e)))
+    return False
 
 
 def _get_runner_lock_path():
@@ -251,14 +401,180 @@ def _get_time_savings_for_tool(tool_key):
         return None, None, None
 
 
+def _build_time_savings_summary(tool_id):
+    """Return dict with normalized time-saving info for the tool, or None."""
+    avg_minutes, min_minutes, max_minutes = _get_time_savings_for_tool(tool_id)
+
+    if avg_minutes is None:
+        if min_minutes is not None and max_minutes is not None:
+            avg_minutes = (float(min_minutes) + float(max_minutes)) / 2.0
+        elif min_minutes is not None:
+            avg_minutes = min_minutes
+        elif max_minutes is not None:
+            avg_minutes = max_minutes
+
+    if min_minutes is None and avg_minutes is not None:
+        min_minutes = avg_minutes
+    if max_minutes is None and avg_minutes is not None:
+        max_minutes = avg_minutes
+
+    if avg_minutes is None and min_minutes is None and max_minutes is None:
+        return None
+
+    summary = {}
+    if avg_minutes is not None:
+        summary["time_saved_minutes"] = avg_minutes
+    if min_minutes is not None:
+        summary["time_saved_minutes_min"] = min_minutes
+    if max_minutes is not None:
+        summary["time_saved_minutes_max"] = max_minutes
+    return summary
+
+
+def _merge_summary_dicts(*summaries):
+    """Return a shallow copy that merges multiple summary dicts."""
+    merged = {}
+    for summary in summaries:
+        if isinstance(summary, dict):
+            try:
+                for key, value in summary.items():
+                    merged[key] = value
+            except Exception:
+                continue
+    return merged
+
+
+def _fallback_merge_summary_dicts(*summaries):
+    """Fallback merger used when IronPython loses reference to _merge_summary_dicts."""
+    merged = {}
+    for summary in summaries:
+        if isinstance(summary, dict):
+            try:
+                for key, value in summary.items():
+                    merged[key] = value
+            except Exception:
+                continue
+
+    warned = False
+    try:
+        warned = bool(globals().get("_MERGE_SUMMARY_FALLBACK_WARNED", False))
+    except Exception:
+        warned = False
+
+    if not warned:
+        try:
+            globals()["_MERGE_SUMMARY_FALLBACK_WARNED"] = True
+        except Exception:
+            pass
+        try:
+            log_fn = globals().get("_log_debug")
+            if callable(log_fn):
+                log_fn(u"WARNING: _merge_summary_dicts missing; using fallback merger.")
+        except Exception:
+            pass
+    return merged
+
+
+def _merge_summary_dicts_safe(*summaries):
+    """Call _merge_summary_dicts if available, otherwise fallback."""
+    merge_func = globals().get("_merge_summary_dicts")
+    if callable(merge_func):
+        try:
+            return merge_func(*summaries)
+        except Exception as merge_err:
+            try:
+                log_fn = globals().get("_log_debug")
+                if callable(log_fn):
+                    log_fn(u"merge_summary_dicts error: {0}".format(_to_unicode(merge_err)))
+            except Exception:
+                pass
+    return _fallback_merge_summary_dicts(*summaries)
+
+
+def _resolve_merge_summary_func():
+    """Return best-available summary merge callable to avoid NameError."""
+    merge_fn = globals().get("_merge_summary_dicts_safe")
+    if callable(merge_fn):
+        return merge_fn
+    merge_fn = globals().get("_merge_summary_dicts")
+    if callable(merge_fn):
+        return merge_fn
+    try:
+        log_fn = globals().get("_log_debug")
+        if callable(log_fn):
+            log_fn(u"WARNING: merge summary helpers missing; using fallback merger.")
+    except Exception:
+        pass
+    return _fallback_merge_summary_dicts
+
+
+def _get_merge_summary_callable():
+    """Resolve merge helper without raising if resolver symbol is missing."""
+    resolver = globals().get("_resolve_merge_summary_func")
+    if callable(resolver):
+        try:
+            merge_fn = resolver()
+            if callable(merge_fn):
+                return merge_fn
+        except Exception as resolver_err:
+            try:
+                log_fn = globals().get("_log_debug")
+                if callable(log_fn):
+                    log_fn(u"WARNING: merge summary resolver failed: {0}".format(_to_unicode(resolver_err)))
+            except Exception:
+                pass
+
+    for fallback_name in ("_merge_summary_dicts_safe", "_merge_summary_dicts"):
+        fallback = globals().get(fallback_name)
+        if callable(fallback):
+            return fallback
+
+    try:
+        log_fn = globals().get("_log_debug")
+        if callable(log_fn):
+            log_fn(u"WARNING: merge summary helpers missing entirely; using fallback merger.")
+    except Exception:
+        pass
+    return _fallback_merge_summary_dicts
+
+
 def _get_session_id():
     global SESSION_ID
     if SESSION_ID:
         return SESSION_ID
     session_id = os.environ.get("EOM_SESSION_ID")
     if not session_id:
+        try:
+            temp_dir = os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()
+            status_files = [
+                os.path.join(temp_dir, "eom_hub_status.json"),
+            ]
+            root_temp = _get_root_temp_dir(temp_dir)
+            if root_temp and root_temp != temp_dir:
+                status_files.append(os.path.join(root_temp, "eom_hub_status.json"))
+
+            for status_file in status_files:
+                if not os.path.exists(status_file):
+                    continue
+                try:
+                    with io.open(status_file, "r", encoding="utf-8") as f:
+                        status_data = json.load(f)
+                    status_session = status_data.get("sessionId")
+                    if status_session:
+                        session_id = _to_unicode(status_session)
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    if not session_id:
         session_id = str(uuid.uuid4())
         os.environ["EOM_SESSION_ID"] = session_id
+    else:
+        try:
+            os.environ["EOM_SESSION_ID"] = _to_unicode(session_id)
+        except Exception:
+            pass
     SESSION_ID = session_id
     return SESSION_ID
 
@@ -275,38 +591,189 @@ def _get_hub_session_path(session_id):
     return os.path.join(temp_root, "eom_hub_session_{0}.json".format(session_id))
 
 
+def _normalize_fs_path(path):
+    """Normalize path for stable comparisons across Win/Py2/Py3."""
+    if not path:
+        return None
+    try:
+        p = _to_unicode(path)
+    except Exception:
+        try:
+            p = unicode(path)
+        except Exception:
+            p = str(path)
+    try:
+        return os.path.normcase(os.path.abspath(p))
+    except Exception:
+        return None
+
+
+def _is_hub_session_alive(hub_session_path, expected_exe=None):
+    """Return True when session file exists and hub port is reachable."""
+    if not hub_session_path or not os.path.exists(hub_session_path):
+        return False
+
+    try:
+        with io.open(hub_session_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+
+        if expected_exe:
+            expected_norm = _normalize_fs_path(expected_exe)
+            actual_norm = _normalize_fs_path(payload.get("exePath"))
+            if expected_norm and actual_norm and actual_norm != expected_norm:
+                return False
+
+        port = payload.get("hubPort")
+        if not port:
+            return False
+        try:
+            port = int(port)
+        except Exception:
+            return False
+        if port <= 0:
+            return False
+
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.settimeout(0.25)
+        try:
+            return probe.connect_ex(("127.0.0.1", port)) == 0
+        finally:
+            try:
+                probe.close()
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
+def _kill_duplicate_hub_processes(expected_exe):
+    """Best-effort cleanup: kill extra EOMHub.exe instances.
+
+    We observed cases where multiple EOMHub.exe were started for one Revit session,
+    producing stale session files / UI disconnect.
+    """
+    if not expected_exe:
+        return
+    try:
+        expected_norm = _normalize_fs_path(expected_exe)
+        if not expected_norm:
+            return
+    except Exception:
+        return
+
+    try:
+        import subprocess as _sub
+        out = _sub.check_output(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                "Get-Process EOMHub -ErrorAction SilentlyContinue | Select-Object Id,Path | ConvertTo-Json -Compress",
+            ],
+            stderr=_sub.STDOUT,
+        )
+        if not out:
+            return
+        try:
+            payload = json.loads(out.decode("utf-8", "ignore"))
+        except Exception:
+            return
+
+        procs = payload if isinstance(payload, list) else ([payload] if payload else [])
+        matching = []
+        for p in procs:
+            try:
+                if _normalize_fs_path(p.get("Path")) == expected_norm:
+                    matching.append(int(p.get("Id")))
+            except Exception:
+                continue
+
+        if len(matching) <= 1:
+            return
+
+        # Keep the most recent PID (heuristic: max pid), kill the rest.
+        keep_pid = max(matching)
+        kill_pids = [pid for pid in matching if pid != keep_pid]
+        if not kill_pids:
+            return
+
+        _log_debug(u"Killing duplicate EOMHub.exe processes: {0}".format(
+            u", ".join([_to_unicode(x) for x in kill_pids])
+        ))
+        cmd = "Stop-Process -Force -Id " + ",".join([str(x) for x in kill_pids])
+        _sub.call(["powershell.exe", "-NoProfile", "-Command", cmd])
+    except Exception:
+        return
+
+
 def find_hub_exe():
     """Find EOMHub.exe in possible locations."""
     script_dir = _to_unicode(os.path.dirname(__file__))
     # script_dir = .../EOMTemplateTools.extension/EOM.tab/01_Хаб.panel/Hub.pushbutton
     extension_dir = _to_unicode(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))))
-    extensions_dir = _to_unicode(os.path.dirname(extension_dir))
 
-    possible_paths = [
-        os.path.join(extension_dir, "bin", "EOMHub.exe"),
-        os.path.join(extensions_dir, "EOMHub.exe"),
-        os.path.join(extension_dir, "EOMHub.exe"),
-        os.path.join(script_dir, "EOMHub.exe"),
-        os.path.join(os.environ.get("APPDATA", ""), "pyRevit", "Extensions", "EOMTemplateTools.extension", "bin", "EOMHub.exe"),
-        r"C:\Users\anton\EOMTemplateTools\EOMHub\dist\EOMHub.exe",
-    ]
+    env_override = os.environ.get("EOM_HUB_EXE_PATH")
+    if env_override and os.path.exists(env_override):
+        return env_override
 
-    for path in possible_paths:
-        if os.path.exists(path):
-            return path
+    canonical = os.path.join(extension_dir, "bin", "EOMHub.exe")
+    if os.path.exists(canonical):
+        return canonical
+
+    appdata_fallback = os.path.join(
+        os.environ.get("APPDATA", ""),
+        "pyRevit",
+        "Extensions",
+        "EOMTemplateTools.extension",
+        "bin",
+        "EOMHub.exe",
+    )
+    if os.path.exists(appdata_fallback):
+        return appdata_fallback
+
     return None
 
 
-def is_hub_running():
-    """Check if EOMHub is running and activate window."""
+def _find_hub_window():
+    """Return handle to any known Hub window title."""
     try:
         user32 = ctypes.windll.user32
-        hwnd = user32.FindWindowW(None, u"EOM Hub")
+    except Exception:
+        return None
+
+    for title in HUB_WINDOW_TITLES:
+        try:
+            hwnd = user32.FindWindowW(None, title)
+        except Exception:
+            hwnd = None
+        if hwnd and hwnd != 0:
+            return hwnd
+    return None
+
+
+def _hide_hub_window():
+    """Hide standalone Hub window if it appears; WPF dockable pane remains active."""
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = _find_hub_window()
+        if hwnd and hwnd != 0:
+            user32.ShowWindow(hwnd, 0)  # SW_HIDE
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def is_hub_running():
+    """Check if Hub is running and activate window."""
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = _find_hub_window()
         if hwnd and hwnd != 0:
             user32.ShowWindow(hwnd, 9)  # SW_RESTORE
             user32.SetForegroundWindow(hwnd)
             return True
-    except:
+    except Exception:
         pass
     return False
 
@@ -407,6 +874,9 @@ def start_command_monitor(start_thread=True):
         os_mod = _os
         get_postcommand_id = _get_postcommand_id
         get_tool_postcommand_id = _get_tool_postcommand_id
+        get_merge_summary_callable = _get_merge_summary_callable
+        fallback_merge_summary_dicts = _fallback_merge_summary_dicts
+        build_time_savings_summary = _build_time_savings_summary
         set_runner_env = _set_runner_env
         clear_runner_env = _clear_runner_env
         get_runner_lock_path = _get_runner_lock_path
@@ -432,6 +902,69 @@ def start_command_monitor(start_thread=True):
         debug_log(u"Monitor init")
         debug_log(u"TEMP_DIR=" + TEMP_DIR)
         debug_log(u"SESSION_ID=" + _to_unicode(session_id))
+
+        def read_latest_time_savings_summary(tool_key):
+            """Read latest time-savings entry for tool from jsonl logs in TEMP_DIR."""
+            if not tool_key:
+                return None
+
+            candidates = []
+            try:
+                candidates.append(_os.path.join(TEMP_DIR, u"eom_time_savings_log.jsonl"))
+            except Exception:
+                pass
+            try:
+                if ROOT_TEMP_DIR and ROOT_TEMP_DIR != TEMP_DIR:
+                    candidates.append(_os.path.join(ROOT_TEMP_DIR, u"eom_time_savings_log.jsonl"))
+            except Exception:
+                pass
+
+            last_entry = None
+            for path in candidates:
+                try:
+                    if not path or not _os.path.exists(path):
+                        continue
+                    with io.open(path, 'r', encoding='utf-8') as f:
+                        for raw in f:
+                            line = raw.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = _json.loads(line)
+                            except Exception:
+                                continue
+                            if not isinstance(entry, dict):
+                                continue
+                            try:
+                                entry_tool = entry.get('tool_key')
+                            except Exception:
+                                entry_tool = None
+                            if entry_tool == tool_key:
+                                last_entry = entry
+                except Exception:
+                    continue
+
+            if not isinstance(last_entry, dict):
+                return None
+
+            summary = {}
+            try:
+                avg = last_entry.get('minutes')
+                mn = last_entry.get('minutes_min')
+                mx = last_entry.get('minutes_max')
+                cnt = last_entry.get('count')
+                if isinstance(avg, (int, float)):
+                    summary['time_saved_minutes'] = float(avg)
+                if isinstance(mn, (int, float)):
+                    summary['time_saved_minutes_min'] = float(mn)
+                if isinstance(mx, (int, float)):
+                    summary['time_saved_minutes_max'] = float(mx)
+                if isinstance(cnt, (int, float)):
+                    summary['placed'] = int(cnt)
+            except Exception:
+                return None
+
+            return summary if summary else None
 
         def write_result_json(payload):
             """Write legacy result JSON atomically (eom_hub_result.json)."""
@@ -566,6 +1099,67 @@ def start_command_monitor(start_thread=True):
         last_raise = [0]
         pending_lock = _threading.Lock()
         last_cancel_time = [0]
+        active_job = {
+            "job_id": None,
+            "tool_id": None,
+            "started_at": 0.0,
+            "cancel_requested_at": 0.0,
+        }
+        active_job_lock = _threading.Lock()
+        cancelled_job_ids = {}
+        cancelled_job_ids_lock = _threading.Lock()
+
+        def _build_cancelled_result(job_id, tool_id, message=None):
+            payload = {
+                "job_id": job_id,
+                "tool_id": tool_id or "unknown",
+                "status": "cancelled",
+                "executionTime": 0,
+                "stats": {"total": 0, "processed": 0, "skipped": 0, "errors": 0},
+                "details": [],
+                "timestamp": _time.time(),
+            }
+            if message:
+                payload["message"] = message
+            return payload
+
+        def _clear_active_job(job_id):
+            try:
+                with active_job_lock:
+                    if str(active_job.get("job_id") or "") == str(job_id):
+                        active_job["job_id"] = None
+                        active_job["tool_id"] = None
+                        active_job["started_at"] = 0.0
+                        active_job["cancel_requested_at"] = 0.0
+            except Exception:
+                pass
+
+        def _is_job_cancelled(job_id):
+            if not job_id:
+                return False
+            try:
+                with cancelled_job_ids_lock:
+                    return str(job_id) in cancelled_job_ids
+            except Exception:
+                return False
+
+        def _mark_job_cancelled(job_id, ts):
+            if not job_id:
+                return
+            try:
+                with cancelled_job_ids_lock:
+                    cancelled_job_ids[str(job_id)] = float(ts or 0)
+            except Exception:
+                pass
+
+        def _unmark_job_cancelled(job_id):
+            if not job_id:
+                return
+            try:
+                with cancelled_job_ids_lock:
+                    cancelled_job_ids.pop(str(job_id), None)
+            except Exception:
+                pass
 
         def _parse_command(cmd):
             if parse_command:
@@ -579,8 +1173,15 @@ def start_command_monitor(start_thread=True):
             mode = None
             action = None
 
-            if cmd == "cancel" or cmd.startswith("run:cancel"):
+            if cmd == "cancel":
                 action = "cancel"
+            elif cmd.startswith("run:cancel"):
+                action = "cancel"
+                parts = cmd.split(":")
+                if len(parts) >= 3 and parts[2]:
+                    job_id = parts[2]
+                if len(parts) >= 4 and parts[3]:
+                    mode = parts[3]
             elif cmd.startswith("run:"):
                 parts = cmd.split(":")
                 if len(parts) >= 2 and parts[1]:
@@ -601,10 +1202,70 @@ def start_command_monitor(start_thread=True):
                 data = _parse_command(cmd)
                 action = data.get("action")
                 if action == "cancel":
+                    cancel_job_id = data.get("job_id")
+                    cancel_ts = _time.time()
+                    cancelled_pending = []
+
+                    if cancel_job_id:
+                        _mark_job_cancelled(cancel_job_id, cancel_ts)
                     with pending_lock:
-                        pending_jobs[:] = []
-                        last_cancel_time[0] = _time.time()
-                    debug_log(u"Cancellation requested")
+                        if cancel_job_id:
+                            keep = []
+                            for job in pending_jobs:
+                                if str(job.get("job_id") or "") == str(cancel_job_id):
+                                    cancelled_pending.append(job)
+                                else:
+                                    keep.append(job)
+                            pending_jobs[:] = keep
+                        else:
+                            cancelled_pending = list(pending_jobs)
+                            pending_jobs[:] = []
+                            last_cancel_time[0] = cancel_ts
+
+                    for pending_job in cancelled_pending:
+                        try:
+                            cancelled_payload = _build_cancelled_result(
+                                pending_job.get("job_id"),
+                                pending_job.get("tool_id"),
+                                u"Задача отменена до запуска",
+                            )
+                            write_result_json(cancelled_payload)
+                            write_job_result_json(pending_job.get("job_id"), cancelled_payload)
+                        except Exception:
+                            pass
+
+                    active_job_id = None
+                    active_tool_id = None
+                    with active_job_lock:
+                        current_job_id = active_job.get("job_id")
+                        if current_job_id and (not cancel_job_id or str(current_job_id) == str(cancel_job_id)):
+                            active_job["cancel_requested_at"] = cancel_ts
+                            active_job_id = current_job_id
+                            active_tool_id = active_job.get("tool_id")
+
+                    if active_job_id:
+                        try:
+                            cancel_marker = {
+                                "job_id": active_job_id,
+                                "tool_id": active_tool_id or "unknown",
+                                "status": "running",
+                                "message": u"Отмена запрошена. Ожидание остановки...",
+                                "cancelRequested": True,
+                                "stats": {"total": 0, "processed": 0, "skipped": 0, "errors": 0},
+                                "timestamp": cancel_ts,
+                            }
+                            write_result_json(cancel_marker)
+                            write_job_result_json(active_job_id, cancel_marker)
+                        except Exception:
+                            pass
+
+                    debug_log(
+                        u"Cancellation requested job_id={0} pending_cancelled={1} active={2}".format(
+                            _to_unicode(cancel_job_id),
+                            len(cancelled_pending),
+                            bool(active_job_id),
+                        )
+                    )
                     return True, False
 
                 if action != "run":
@@ -635,18 +1296,38 @@ def start_command_monitor(start_thread=True):
                 debug_log(u"ERROR parsing cmd: " + _to_unicode(e))
             return False, False
 
+        _status_cache = {
+            "connected": False,
+            "document": None,
+            "documentPath": None,
+            "revitVersion": None,
+        }
+
         def write_status():
-            """Write status file for Hub."""
+            """Write status file for Hub.
+
+            Note: monitor loop runs in a background thread where direct Revit API
+            access can intermittently fail. We keep last known UI state in cache
+            and always refresh timestamp so Hub status doesn't become stale.
+            """
             try:
                 uiapp = uiapp_ref
                 uidoc = uiapp.ActiveUIDocument if uiapp else None
                 doc = uidoc.Document if uidoc else None
-                
+
+                _status_cache["connected"] = doc is not None
+                _status_cache["document"] = getattr(doc, "Title", None) if doc else None
+                _status_cache["documentPath"] = getattr(doc, "PathName", None) if doc else None
+                _status_cache["revitVersion"] = getattr(uiapp.Application, "VersionNumber", None) if uiapp else None
+            except Exception:
+                pass
+
+            try:
                 status = {
-                    "connected": doc is not None,
-                    "document": getattr(doc, "Title", None) if doc else None,
-                    "documentPath": getattr(doc, "PathName", None) if doc else None,
-                    "revitVersion": getattr(uiapp.Application, "VersionNumber", None) if uiapp else None,
+                    "connected": bool(_status_cache.get("connected", False)),
+                    "document": _status_cache.get("document"),
+                    "documentPath": _status_cache.get("documentPath"),
+                    "revitVersion": _status_cache.get("revitVersion"),
                     "tempDir": TEMP_DIR,
                     "sessionId": session_id,
                     "commandFile": COMMAND_FILE,
@@ -666,7 +1347,6 @@ def start_command_monitor(start_thread=True):
                     except Exception:
                         pass
             except Exception:
-                # debug_log("ERROR write_status: " + str(e))
                 pass
 
         try:
@@ -674,12 +1354,100 @@ def start_command_monitor(start_thread=True):
         except Exception:
             string_types = (str,)
 
+        def emit_result_to_output(doc, tool_id, job_id, result):
+            """Print Hub job result into pyRevit output window."""
+            try:
+                if not isinstance(result, dict):
+                    return
+
+                status = _to_unicode(result.get("status") or "unknown")
+                execution_time = result.get("executionTime")
+                stats = result.get("stats") if isinstance(result.get("stats"), dict) else None
+                summary = result.get("summary") if isinstance(result.get("summary"), dict) else None
+                details = result.get("details") if isinstance(result.get("details"), list) else []
+                message = result.get("error") or result.get("message")
+
+                print(u"\n" + (u"=" * 72))
+                print(u"UniTools Hub — результат запуска")
+
+                try:
+                    doc_title = _to_unicode(getattr(doc, "Title", None) or u"(без документа)")
+                except Exception:
+                    doc_title = u"(без документа)"
+
+                print(u"Документ: {0}".format(doc_title))
+                print(u"Инструмент: {0}".format(_to_unicode(tool_id or "unknown")))
+                print(u"Задача: {0}".format(_to_unicode(job_id or "")))
+                print(u"Статус: {0}".format(status))
+
+                if isinstance(execution_time, (int, float)):
+                    print(u"Время: {0} сек".format(round(float(execution_time), 2)))
+
+                if stats:
+                    print(
+                        u"Статистика: всего={0}, успешно={1}, пропущено={2}, ошибки={3}".format(
+                            stats.get("total", 0),
+                            stats.get("processed", 0),
+                            stats.get("skipped", 0),
+                            stats.get("errors", 0),
+                        )
+                    )
+
+                if isinstance(message, string_types) and _to_unicode(message).strip():
+                    print(u"Сообщение: {0}".format(_to_unicode(message).strip()))
+
+                if summary:
+                    print(u"Сводка:")
+                    try:
+                        print(_to_unicode(_json.dumps(summary, ensure_ascii=False, indent=2)))
+                    except Exception:
+                        print(_to_unicode(summary))
+
+                if details:
+                    print(u"Логи:")
+                    for idx, item in enumerate(details[:40]):
+                        try:
+                            status_value = _to_unicode(item.get("status") or "info") if isinstance(item, dict) else u"info"
+                            msg_value = _to_unicode(item.get("message") or "") if isinstance(item, dict) else _to_unicode(item)
+                            print(u"  [{0}] {1}".format(status_value, msg_value))
+                        except Exception:
+                            continue
+                    if len(details) > 40:
+                        print(u"  ... еще строк: {0}".format(len(details) - 40))
+
+                print(u"=" * 72)
+            except Exception as output_err:
+                try:
+                    debug_log(u"emit_result_to_output failed: " + _to_unicode(output_err))
+                except Exception:
+                    pass
+
         def process_tool(uiapp, doc, tool_id=None, job_id=None, enqueue_time=None):
             """Execute tool script and capture output."""
             tool_id = tool_id or "unknown"
             job_id = job_id or "job_{0}_{1}".format(tool_id, int(_time.time()))
             enqueue_time = enqueue_time or _time.time()
             script_path = TOOL_SCRIPTS.get(tool_id)
+
+            try:
+                with active_job_lock:
+                    active_job["job_id"] = job_id
+                    active_job["tool_id"] = tool_id
+                    active_job["started_at"] = _time.time()
+                    active_job["cancel_requested_at"] = 0.0
+            except Exception:
+                pass
+
+            merge_summary = fallback_merge_summary_dicts
+            try:
+                maybe_merge = get_merge_summary_callable()
+                if callable(maybe_merge):
+                    merge_summary = maybe_merge
+            except Exception as merge_resolve_err:
+                try:
+                    debug_log(u"merge summary resolver failed: " + _to_unicode(merge_resolve_err))
+                except Exception:
+                    pass
             
             # Try to resolve path-style tool id directly
             if (not script_path) and isinstance(tool_id, string_types):
@@ -716,20 +1484,18 @@ def start_command_monitor(start_thread=True):
                     }
                     write_result_json(result)
                     write_job_result_json(job_id, result)
+                    emit_result_to_output(doc, tool_id, job_id, result)
+                    _clear_active_job(job_id)
                     return
 
-                # Check cancellation
-                if enqueue_time < last_cancel_time[0]:
-                    result = {
-                        "job_id": job_id,
-                        "tool_id": tool_id,
-                        "status": "cancelled",
-                        "executionTime": 0,
-                        "stats": {"total": 0, "processed": 0, "skipped": 0, "errors": 0},
-                        "details": []
-                    }
+                # Check cancellation before execution.
+                if enqueue_time < last_cancel_time[0] or _is_job_cancelled(job_id):
+                    result = _build_cancelled_result(job_id, tool_id, u"Задача отменена до запуска")
                     write_result_json(result)
                     write_job_result_json(job_id, result)
+                    emit_result_to_output(doc, tool_id, job_id, result)
+                    _unmark_job_cancelled(job_id)
+                    _clear_active_job(job_id)
                     return
 
                 # Write "running" marker
@@ -765,7 +1531,19 @@ def start_command_monitor(start_thread=True):
 
                 execution_start = _time.time()
                 script_error = None
-                hub_summary = None
+
+                time_savings_summary = read_latest_time_savings_summary(tool_id)
+                if time_savings_summary is None:
+                    try:
+                        if callable(build_time_savings_summary):
+                            time_savings_summary = build_time_savings_summary(tool_id)
+                    except Exception as ts_err:
+                        try:
+                            debug_log(u"time savings summary failed: " + _to_unicode(ts_err))
+                        except Exception:
+                            pass
+
+                hub_summary = merge_summary(time_savings_summary)
                 cancelled_by_user = False
                 env_backup = {}
                 ran_via_pyrevit = False
@@ -802,34 +1580,33 @@ def start_command_monitor(start_thread=True):
                         pyrevit_info = run_err
 
                     if ran_via_pyrevit:
-                        try:
-                            avg_minutes, min_minutes, max_minutes = get_time_savings_for_tool(tool_id)
-                            hub_summary = {
+                        hub_summary = merge_summary(
+                            hub_summary,
+                            {
                                 "runner": "pyrevit_command",
                                 "command": _to_unicode(pyrevit_info),
-                            }
-                            if avg_minutes is None:
-                                if min_minutes is not None and max_minutes is not None:
-                                    avg_minutes = (float(min_minutes) + float(max_minutes)) / 2.0
-                                elif min_minutes is not None:
-                                    avg_minutes = min_minutes
-                                elif max_minutes is not None:
-                                    avg_minutes = max_minutes
+                            },
+                        )
 
-                            if min_minutes is None and avg_minutes is not None:
-                                min_minutes = avg_minutes
-                            if max_minutes is None and avg_minutes is not None:
-                                max_minutes = avg_minutes
-
-                            if avg_minutes is not None:
-                                hub_summary["time_saved_minutes"] = avg_minutes
-                            if min_minutes is not None:
-                                hub_summary["time_saved_minutes_min"] = min_minutes
-                            if max_minutes is not None:
-                                hub_summary["time_saved_minutes_max"] = max_minutes
-                        except Exception:
-                            hub_summary = None
+                        # pyRevit command executes in a separate command context,
+                        # so EOM_HUB_RESULT is not available via script_globals.
+                        # Pull latest persisted time-saving metrics after command run.
+                        try:
+                            latest_summary = read_latest_time_savings_summary(tool_id)
+                            if latest_summary is None and callable(build_time_savings_summary):
+                                latest_summary = build_time_savings_summary(tool_id)
+                            if isinstance(latest_summary, dict):
+                                hub_summary = merge_summary(hub_summary, latest_summary)
+                        except Exception as summary_err:
+                            try:
+                                debug_log(u"post-command time summary failed: " + _to_unicode(summary_err))
+                            except Exception:
+                                pass
                     else:
+                        if not isinstance(hub_summary, dict):
+                            hub_summary = {}
+                        hub_summary.setdefault("runner", "direct")
+
                         # Capture stdout/stderr for direct exec
                         captured_stdout = SafeStringIO()
                         captured_stderr = SafeStringIO()
@@ -858,6 +1635,15 @@ def start_command_monitor(start_thread=True):
                         except Exception:
                             pass
 
+                        def _is_cancel_requested_for_this_job():
+                            try:
+                                with active_job_lock:
+                                    if str(active_job.get("job_id") or "") != str(job_id):
+                                        return False
+                                    return bool(active_job.get("cancel_requested_at") or 0) or _is_job_cancelled(job_id)
+                            except Exception:
+                                return False
+
                         script_globals = {
                             '__revit__': uiapp,
                             '__file__': script_path,
@@ -870,22 +1656,48 @@ def start_command_monitor(start_thread=True):
                             'EOM_HUB_JOB_ID': job_id,
                             'EOM_HUB_TOOL_ID': tool_id,
                             'EOM_SESSION_ID': session_id,
-                            'EOM_IS_CANCELLED': lambda: last_cancel_time[0] > execution_start,
+                            'EOM_IS_CANCELLED': lambda: (last_cancel_time[0] > execution_start) or _is_cancel_requested_for_this_job(),
                         }
+
+                        class _HubCancelException(SystemExit):
+                            pass
+
+                        def _cancel_trace(frame, event, arg):
+                            if event != 'line':
+                                return _cancel_trace
+                            if _is_cancel_requested_for_this_job():
+                                raise _HubCancelException('Cancelled by user')
+                            return _cancel_trace
 
                         # Read script as UTF-8
                         with io.open(script_path, 'r', encoding='utf-8') as f:
                             script_code = f.read()
 
                         # EXECUTE
-                        exec(script_code, script_globals)
+                        old_trace = None
+                        try:
+                            old_trace = sys.gettrace()
+                        except Exception:
+                            old_trace = None
+
+                        try:
+                            try:
+                                sys.settrace(_cancel_trace)
+                            except Exception:
+                                pass
+                            exec(script_code, script_globals)
+                        finally:
+                            try:
+                                sys.settrace(old_trace)
+                            except Exception:
+                                pass
 
                         try:
                             maybe_summary = script_globals.get('EOM_HUB_RESULT')
                             if isinstance(maybe_summary, dict):
-                                hub_summary = maybe_summary
+                                hub_summary = merge_summary(hub_summary, maybe_summary)
                         except Exception:
-                            hub_summary = None
+                            pass
 
                 except BaseException as script_ex:
                     script_error = script_ex
@@ -998,15 +1810,19 @@ def start_command_monitor(start_thread=True):
                  
                 write_result_json(result)
                 write_job_result_json(job_id, result)
+                emit_result_to_output(doc, tool_id, job_id, result)
                 debug_log(u"process_tool finished status=" + result.get("status", "unknown"))
+
+                _unmark_job_cancelled(job_id)
+                _clear_active_job(job_id)
 
                 try:
                     user32 = ctypes.windll.user32
-                    hwnd = user32.FindWindowW(None, u"EOM Hub")
+                    hwnd = _find_hub_window()
                     if hwnd and hwnd != 0:
                         user32.ShowWindow(hwnd, 9)
                         user32.SetForegroundWindow(hwnd)
-                except:
+                except Exception:
                     pass
                       
             except Exception as e:
@@ -1020,6 +1836,9 @@ def start_command_monitor(start_thread=True):
                 }
                 write_result_json(result)
                 write_job_result_json(job_id, result)
+                emit_result_to_output(doc, tool_id, job_id, result)
+                _unmark_job_cancelled(job_id)
+                _clear_active_job(job_id)
 
         # Expose for runner mode
         global _EOM_PROCESS_TOOL
@@ -1050,11 +1869,11 @@ def start_command_monitor(start_thread=True):
 
         class ApplyHandler(IExternalEventHandler):
             def Execute(self, uiapp):
+                job = None
                 try:
                     debug_log(u"ApplyHandler.Execute called")
                     uidoc = uiapp.ActiveUIDocument if uiapp else None
                     doc = uidoc.Document if uidoc else None
-                    job = None
                     queue_len = 0
                     with pending_lock:
                         queue_len = len(pending_jobs)
@@ -1169,6 +1988,24 @@ def start_command_monitor(start_thread=True):
                         needs_raise[0] = True
                 except Exception as e:
                     debug_log(u"ApplyHandler ERROR: " + _to_unicode(e))
+                    try:
+                        if isinstance(job, dict):
+                            failed_job_id = job.get("job_id")
+                            failed_tool_id = job.get("tool_id") or "unknown"
+                            if failed_job_id:
+                                failed_result = {
+                                    "job_id": failed_job_id,
+                                    "tool_id": failed_tool_id,
+                                    "status": "error",
+                                    "message": u"Сбой обработки задания в Revit monitor",
+                                    "error": _to_unicode(e),
+                                    "stats": {"total": 0, "processed": 0, "skipped": 0, "errors": 1},
+                                    "timestamp": _time.time(),
+                                }
+                                write_result_json(failed_result)
+                                write_job_result_json(failed_job_id, failed_result)
+                    except Exception:
+                        pass
 
             def GetName(self):
                 return "EOM Apply Handler"
@@ -1344,10 +2181,69 @@ def _run_job_once(tool_id, job_id):
             pass
 
 
+def _launch_hub_headless(hub_exe, session_id):
+    """Launch Hub backend in headless mode without opening a standalone UI window."""
+    hub_exe = _to_unicode(hub_exe)
+    args = [
+        hub_exe,
+        u"--session={0}".format(_to_unicode(session_id)),
+        u"--headless",
+    ]
+
+    try:
+        temp_root = tempfile.gettempdir()
+    except Exception:
+        temp_root = None
+
+    # Keep process environment aligned even if we end up launching without explicit env.
+    try:
+        if temp_root:
+            os.environ["TEMP"] = _to_unicode(temp_root)
+            os.environ["TMP"] = _to_unicode(temp_root)
+        os.environ["EOM_SESSION_ID"] = _to_unicode(session_id)
+        os.environ["EOM_HUB_HEADLESS"] = "1"
+    except Exception:
+        pass
+
+    try:
+        launch_env = os.environ.copy()
+        subprocess.Popen(args, env=launch_env)
+        _log_debug(u"Hub launched headless (explicit env)")
+        return True
+    except Exception as first_err:
+        _log_debug(u"Hub launch with explicit env failed: {0}".format(_to_unicode(first_err)))
+
+    try:
+        subprocess.Popen(args)
+        _log_debug(u"Hub launched headless (inherited env)")
+        return True
+    except Exception as second_err:
+        _log_debug(u"Hub launch failed: {0}".format(_to_unicode(second_err)))
+
+    return False
+
+
 def main():
     session_id = _get_session_id()
 
-    run_tool_id = os.environ.get("EOM_HUB_RUN_TOOL_ID")
+    # Do not auto-start on Revit startup. Allow only:
+    # 1) explicit runner mode (EOM_HUB_RUN_TOOL_ID)
+    # 2) explicit opt-in autostart flag (EOM_HUB_AUTOSTART=1)
+    # 3) direct manual execution (this script invoked as __main__)
+    run_tool_env = None
+    autostart_env = None
+    try:
+        run_tool_env = os.environ.get("EOM_HUB_RUN_TOOL_ID")
+        autostart_env = os.environ.get("EOM_HUB_AUTOSTART")
+    except Exception:
+        return
+
+    is_manual_click = (__name__ == "__main__")
+    autostart_enabled = autostart_env in ("1", "true", "True", "yes", "YES")
+    if not run_tool_env and not autostart_enabled and not is_manual_click:
+        return
+
+    run_tool_id = run_tool_env
     if run_tool_id:
         run_job_id = os.environ.get("EOM_HUB_RUN_JOB_ID") or u"job_{0}_{1}".format(run_tool_id, int(time.time()))
         _run_job_once(run_tool_id, run_job_id)
@@ -1356,26 +2252,52 @@ def main():
     # Start command monitor
     start_command_monitor()
 
-    # If Hub already running for this session, just focus and exit
-    hub_session_path = _get_hub_session_path(session_id)
-    if hub_session_path and os.path.exists(hub_session_path):
-        is_hub_running()
-        return
+    # Always prefer dockable pane UI.
+    pane_shown = _show_dockable_pane()
+    if not pane_shown:
+        _prompt_missing_dockable_pane()
 
     hub_exe = find_hub_exe()
-    if hub_exe:
-        hub_exe = _to_unicode(hub_exe)
-        try:
-            launch_env = os.environ.copy()
-            temp_root = tempfile.gettempdir()
-            if temp_root:
-                launch_env["TEMP"] = _to_unicode(temp_root)
-                launch_env["TMP"] = _to_unicode(temp_root)
-            launch_env["EOM_SESSION_ID"] = _to_unicode(session_id)
-            subprocess.Popen([hub_exe, u"--session={0}".format(_to_unicode(session_id))], close_fds=True, env=launch_env)
-        except Exception:
+
+    # Avoid multiple EXE instances fighting for the same port/session.
+    try:
+        _kill_duplicate_hub_processes(hub_exe)
+    except Exception:
+        pass
+
+    # If Hub already running for this session, do not launch duplicate process.
+    hub_session_path = _get_hub_session_path(session_id)
+    if _is_hub_session_alive(hub_session_path, expected_exe=hub_exe):
+        if pane_shown:
             try:
-                os.startfile(_to_unicode(hub_exe))
+                _hide_hub_window()
+            except Exception:
+                pass
+        return
+
+    if hub_session_path and os.path.exists(hub_session_path):
+        try:
+            os.remove(hub_session_path)
+        except Exception:
+            pass
+
+    if hub_exe:
+        launched = _launch_hub_headless(hub_exe, session_id)
+        if not launched:
+            try:
+                from pyrevit import forms
+                forms.alert(
+                    u"Не удалось запустить UniTools Hub в фоновом режиме.\n"
+                    u"Проверьте eom_debug.log и повторите запуск.",
+                    title=u"UniTools Hub",
+                    warn_icon=True,
+                )
+            except Exception:
+                pass
+        elif pane_shown:
+            try:
+                time.sleep(0.2)
+                _hide_hub_window()
             except Exception:
                 pass
     else:
@@ -1383,10 +2305,11 @@ def main():
         try:
             from pyrevit import forms
             forms.alert(
-                u"EOMHub.exe не найден.\n\n"
-                u"Соберите Hub командой:\n"
+                u"UniTools Hub (EOMHub.exe) не найден.\n\n"
+                u"Соберите его командой:\n"
                 u"cd C:\\Users\\anton\\EOMTemplateTools\\EOMHub\n"
-                u".\\build.ps1"
+                u".\\build.ps1",
+                title=u"UniTools Hub",
             )
         except Exception:
             pass

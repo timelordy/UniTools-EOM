@@ -1,4 +1,4 @@
-# EOM Hub Build Script
+# UniTools Hub Build Script
 # Usage: .\build.ps1
 # Prerequisites: Python 3.10+, Node.js 18+
 
@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
 Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host "      EOM Hub Build Script          " -ForegroundColor Cyan
+Write-Host "      UniTools Hub Build Script     " -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 
 # Find Python
@@ -118,23 +118,66 @@ if (-not $SkipBackend) {
     Write-Host "`n[3/4] Skipping backend build" -ForegroundColor Gray
 }
 
-# Step 4: Copy to pyRevit extension
-Write-Host "`n[4/4] Copying to pyRevit extension..." -ForegroundColor Yellow
+# Step 4: Install canonical EXE and mirror to pyRevit extension
+Write-Host "`n[4/4] Installing canonical EOMHub.exe..." -ForegroundColor Yellow
+
+$canonicalExt = Join-Path $PSScriptRoot "..\EOMTemplateTools.extension\bin"
+if (-not (Test-Path $canonicalExt)) {
+    New-Item -ItemType Directory -Path $canonicalExt -Force | Out-Null
+}
+$canonicalExe = Join-Path $canonicalExt "EOMHub.exe"
 
 $pyrevitExt = "$env:APPDATA\pyRevit\Extensions\EOMTemplateTools.extension\bin"
 if (-not (Test-Path $pyrevitExt)) {
     New-Item -ItemType Directory -Path $pyrevitExt -Force | Out-Null
 }
 
-Copy-Item "dist/EOMHub.exe" "$pyrevitExt/EOMHub.exe" -Force
-Write-Host "Copied to: $pyrevitExt/EOMHub.exe" -ForegroundColor Green
+$pyrevitExe = Join-Path $pyrevitExt "EOMHub.exe"
+
+# EOMHub.exe can be running (or held by Revit/WebView), locking the destination.
+# Stop it and retry copy once.
+try {
+    Get-Process EOMHub -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+} catch {
+    # ignore
+}
+
+try {
+    Copy-Item "dist/EOMHub.exe" $canonicalExe -Force -ErrorAction Stop
+    Write-Host "Canonical copy updated: $canonicalExe" -ForegroundColor Green
+
+    $mirrorNeeded = $true
+    if (Test-Path $pyrevitExe) {
+        try {
+            $canonicalHash = (Get-FileHash $canonicalExe -Algorithm SHA256).Hash
+            $pyrevitHash = (Get-FileHash $pyrevitExe -Algorithm SHA256).Hash
+            if ($canonicalHash -eq $pyrevitHash) {
+                $mirrorNeeded = $false
+            }
+        } catch {
+            $mirrorNeeded = $true
+        }
+    }
+
+    if ($mirrorNeeded) {
+        Copy-Item $canonicalExe $pyrevitExe -Force -ErrorAction Stop
+        Write-Host "Mirrored to: $pyrevitExe" -ForegroundColor Green
+    } else {
+        Write-Host "Mirror is up to date: $pyrevitExe" -ForegroundColor Gray
+    }
+} catch {
+    Write-Host "WARNING: Failed to install/mirror EOMHub.exe (file may be locked)." -ForegroundColor Yellow
+    Write-Host "Close Revit / stop EOMHub.exe and rerun build.ps1." -ForegroundColor Yellow
+}
 
 # Summary
 Write-Host "`n=====================================" -ForegroundColor Cyan
 Write-Host "        Build Complete!              " -ForegroundColor Green
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Output: dist/EOMHub.exe" -ForegroundColor White
-Write-Host "Installed to: $pyrevitExt" -ForegroundColor White
+Write-Host "Canonical install: $canonicalExt" -ForegroundColor White
+Write-Host "Mirror install: $pyrevitExt" -ForegroundColor White
 
 if ($Dev) {
     Write-Host "`nStarting in dev mode..." -ForegroundColor Yellow

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""EOM Hub API - Tools endpoints для коммуникации с Revit."""
+"""UniTools Hub API - Tools endpoints для коммуникации с Revit."""
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -28,18 +28,19 @@ def _expose(func):
 
 # === LOGGING ===
 LOG_FILE = os.path.join(os.environ.get("TEMP", tempfile.gettempdir()), "eom_hub_debug.log")
+LOG_VERSION = "api-tools:2026-02-07b"
 
 def log(message: str):
     """Write debug message to log file."""
     try:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] {message}\n")
+            f.write(f"[{timestamp}] [{LOG_VERSION}] {message}\n")
     except:
         pass
 
 log("=" * 60)
-log("EOM Hub API started")
+log("UniTools Hub API started")
 log(f"Log file: {LOG_FILE}")
 
 _ICON_CACHE: dict[str, str] = {}
@@ -92,6 +93,16 @@ def _get_session_id() -> str:
     return os.environ.get("EOM_SESSION_ID", "")
 
 
+def _is_session_match(payload: Optional[dict[str, Any]]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    current_session = (_get_session_id() or "").strip()
+    if not current_session:
+        return True
+    payload_session = str(payload.get("sessionId", "") or "").strip()
+    return payload_session == current_session
+
+
 def _get_status_file() -> str:
     return os.path.join(_get_temp_root(), "eom_hub_status.json")
 
@@ -139,27 +150,90 @@ def _iter_status_candidates() -> list[str]:
     return ordered
 
 
+def _read_latest_status_payload() -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """Read the freshest status payload available from known candidates."""
+    best_match_path: Optional[str] = None
+    best_match_payload: Optional[dict[str, Any]] = None
+    best_match_ts = -1.0
+
+    best_any_path: Optional[str] = None
+    best_any_payload: Optional[dict[str, Any]] = None
+    best_any_ts = -1.0
+
+    for status_file in _iter_status_candidates():
+        if not os.path.exists(status_file):
+            continue
+        try:
+            with open(status_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            timestamp = float(payload.get("timestamp", 0) or 0)
+            if timestamp >= best_any_ts:
+                best_any_ts = timestamp
+                best_any_path = status_file
+                best_any_payload = payload
+            if _is_session_match(payload) and timestamp >= best_match_ts:
+                best_match_ts = timestamp
+                best_match_path = status_file
+                best_match_payload = payload
+        except Exception:
+            continue
+
+    if best_match_payload is not None:
+        return best_match_path, best_match_payload
+    return best_any_path, best_any_payload
+
+
+def _get_runtime_temp_dir() -> str:
+    """Resolve temp directory used by active Revit monitor session."""
+    _, payload = _read_latest_status_payload()
+    if isinstance(payload, dict):
+        temp_dir = payload.get("tempDir")
+        if isinstance(temp_dir, str) and temp_dir:
+            return temp_dir
+
+        command_file = payload.get("commandFile")
+        if isinstance(command_file, str) and command_file:
+            try:
+                return os.path.dirname(command_file)
+            except Exception:
+                pass
+
+    return _get_temp_root()
+
+
 def _get_command_file() -> str:
-    return os.path.join(_get_temp_root(), "eom_hub_command.txt")
+    _, payload = _read_latest_status_payload()
+    if isinstance(payload, dict):
+        command_file = payload.get("commandFile")
+        if isinstance(command_file, str) and command_file:
+            return command_file
+    return os.path.join(_get_runtime_temp_dir(), "eom_hub_command.txt")
 
 
 def _get_command_file_for_job(job_id: str) -> str:
     # One command file per job to support queueing.
     # Revit monitor scans TEMP for these files.
-    return os.path.join(_get_temp_root(), f"eom_hub_command_{job_id}.txt")
+    base_dir = os.path.dirname(_get_command_file()) or _get_runtime_temp_dir()
+    return os.path.join(base_dir, f"eom_hub_command_{job_id}.txt")
 
 
 def _get_result_file() -> str:
-    return os.path.join(_get_temp_root(), "eom_hub_result.json")
+    _, payload = _read_latest_status_payload()
+    if isinstance(payload, dict):
+        result_file = payload.get("resultFile")
+        if isinstance(result_file, str) and result_file:
+            return result_file
+    return os.path.join(_get_runtime_temp_dir(), "eom_hub_result.json")
 
 
 def _get_result_file_for_job(job_id: str) -> str:
     # One result file per job to avoid job_id collisions.
-    return os.path.join(_get_temp_root(), f"eom_hub_result_{job_id}.json")
+    base_dir = os.path.dirname(_get_result_file()) or _get_runtime_temp_dir()
+    return os.path.join(base_dir, f"eom_hub_result_{job_id}.json")
 
 
 def _get_savings_file() -> str:
-    return os.path.join(_get_temp_root(), "eom_time_savings.json")
+    return os.path.join(_get_runtime_temp_dir(), "eom_time_savings.json")
 
 
 def _get_tab_path_from_revit_status() -> Optional[Path]:
@@ -393,6 +467,12 @@ def get_tools_config():
 @_expose
 def get_revit_status():
     checked = []
+    current_session = (_get_session_id() or "").strip()
+    best_match: Optional[dict[str, Any]] = None
+    best_match_age = float("inf")
+    best_any: Optional[dict[str, Any]] = None
+    best_any_age = float("inf")
+
     for status_file in _iter_status_candidates():
         checked.append(status_file)
         log(f"get_revit_status: status_file={status_file}")
@@ -402,17 +482,29 @@ def get_revit_status():
                     status = json.load(f)
                 age = time.time() - status.get("timestamp", 0)
                 log(f"get_revit_status: status age={age:.2f}s")
-                if age < 10:
-                    return {
-                        "connected": True,
-                        "document": status.get("document"),
-                        "documentPath": status.get("documentPath"),
-                        "revitVersion": status.get("revitVersion"),
-                        "sessionId": _get_session_id(),
-                    }
+                payload_session = str(status.get("sessionId", "") or "").strip()
+                session_ok = (not current_session) or (payload_session == current_session)
+
+                if age < 10 and session_ok and age < best_match_age:
+                    best_match_age = age
+                    best_match = status
+                if age < 10 and age < best_any_age:
+                    best_any_age = age
+                    best_any = status
             except Exception as e:
                 log(f"get_revit_status ERROR reading {status_file}: {e}")
                 continue
+
+    active = best_match or best_any
+    if active is not None:
+        return {
+            "connected": True,
+            "document": active.get("document"),
+            "documentPath": active.get("documentPath"),
+            "revitVersion": active.get("revitVersion"),
+            "sessionId": current_session or active.get("sessionId") or "",
+        }
+
     log(f"get_revit_status: no recent status in {len(checked)} candidates")
     return {"connected": False, "document": None, "sessionId": _get_session_id()}
 
@@ -432,6 +524,52 @@ def run_tool(tool_id: str, job_id: Optional[str] = None):
             "success": False,
             "error": "Revit не готов. Откройте проект и нажмите кнопку Hub в Revit, затем повторите.",
         }
+
+    # Special-case cancellation: do NOT generate a new job_id and do NOT overwrite
+    # job result files with "pending" markers (it would clobber existing state).
+    try:
+        if isinstance(tool_id, str) and tool_id.strip() == "cancel":
+            command_file = _get_command_file()
+            if job_id:
+                command = f"run:cancel:{job_id}"
+            else:
+                command = "cancel"
+
+            log(f"Cancel command file: {command_file}")
+            log(f"Cancel command: {command}")
+            try:
+                with open(command_file, "w", encoding="utf-8") as f:
+                    f.write(command)
+                try:
+                    os.utime(command_file, None)
+                except Exception:
+                    pass
+
+                if job_id:
+                    try:
+                        legacy_command_file = _get_command_file_for_job(job_id)
+                        with open(legacy_command_file, "w", encoding="utf-8") as f:
+                            f.write(command)
+                        try:
+                            os.utime(legacy_command_file, None)
+                        except Exception:
+                            pass
+                        log(f"Cancel legacy command file: {legacy_command_file}")
+                    except Exception as legacy_err:
+                        log(f"Cancel legacy command file write failed: {legacy_err}")
+
+                return {
+                    "success": True,
+                    "job_id": job_id,
+                    "tool_id": "cancel",
+                    "message": "Запрос на отмену отправлен в Revit",
+                }
+            except Exception as write_err:
+                log(f"ERROR writing cancel command: {write_err}")
+                return {"success": False, "error": str(write_err)}
+    except Exception:
+        # Fall back to the normal path.
+        pass
 
     if not job_id:
         # Генерируем уникальный job_id с микросекундами (без tool_id, чтобы избежать недопустимых символов в файле)
@@ -503,6 +641,80 @@ def run_tool(tool_id: str, job_id: Optional[str] = None):
     except Exception as e:
         log(f"ERROR writing command: {e}")
         return {"success": False, "error": str(e)}
+
+
+def _find_time_savings_log_entry(
+    tool_id: str, job_timestamp: Optional[float], source_path: Optional[str] = None
+) -> Optional[dict[str, Any]]:
+    """Find best matching time-savings log entry for a completed job."""
+    if not isinstance(tool_id, str) or not tool_id:
+        return None
+
+    roots: list[str] = []
+    try:
+        if source_path:
+            roots.append(os.path.dirname(source_path))
+    except Exception:
+        pass
+    try:
+        runtime_dir = _get_runtime_temp_dir()
+        if runtime_dir:
+            roots.append(runtime_dir)
+    except Exception:
+        pass
+    roots.append(_get_temp_root())
+
+    seen = set()
+    unique_roots: list[str] = []
+    for root in roots:
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        unique_roots.append(root)
+
+    session_id = (_get_session_id() or "").strip()
+    candidates: list[str] = []
+    for root in unique_roots:
+        if session_id:
+            candidates.append(os.path.join(root, f"eom_time_savings_log_{session_id}.jsonl"))
+        candidates.append(os.path.join(root, "eom_time_savings_log.jsonl"))
+
+    best_entry: Optional[dict[str, Any]] = None
+    best_score = float("inf")
+    best_ts = -1.0
+
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(entry, dict):
+                        continue
+                    if str(entry.get("tool_key", "") or "") != tool_id:
+                        continue
+
+                    entry_ts = _as_float(entry.get("timestamp", 0.0), 0.0)
+                    if job_timestamp is None:
+                        if entry_ts >= best_ts:
+                            best_ts = entry_ts
+                            best_entry = entry
+                    else:
+                        score = abs(entry_ts - float(job_timestamp))
+                        if score < best_score:
+                            best_score = score
+                            best_entry = entry
+        except Exception as read_err:
+            log(f"time-savings log read error: {path}: {read_err}")
+
+    return best_entry
 
 
 @_expose
@@ -654,6 +866,27 @@ def save_time_savings(data: dict):
 @_expose
 def add_time_saving(tool_id: str, minutes: Any):
     savings: dict[str, Any] = _normalize_time_savings(get_time_savings())
+
+    # Prefer the latest time-savings measurement reported by the tool itself
+    # (written by EOMTemplateTools.extension/lib/time_savings.py into jsonl).
+    # This avoids frontend falling back to static `tool.time_saved` (e.g. 15 min)
+    # when job result summary misses time_saved_minutes*.
+    try:
+        entry = _find_time_savings_log_entry(tool_id, job_timestamp=None, source_path=_get_savings_file())
+        if isinstance(entry, dict):
+            entry_ts = _as_float(entry.get("timestamp", 0.0), 0.0)
+            age = abs(time.time() - entry_ts) if entry_ts > 0 else 999999.0
+            if age < 120.0:
+                mn_val = entry.get("minutes_min")
+                mx_val = entry.get("minutes_max")
+                avg_val = entry.get("minutes")
+                if isinstance(mn_val, (int, float)) and isinstance(mx_val, (int, float)):
+                    minutes = {"min": float(mn_val), "max": float(mx_val)}
+                elif isinstance(avg_val, (int, float)):
+                    minutes = float(avg_val)
+    except Exception as e:
+        log(f"add_time_saving: failed to load tool time_savings log: {e}")
+
     mn, mx = _parse_minutes_range(minutes)
     avg = (mn + mx) / 2.0
 

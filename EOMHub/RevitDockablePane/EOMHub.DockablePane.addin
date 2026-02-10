@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>UniTools Hub App</Name>
+    <Assembly>EOMHubDockablePane\EOMHub.DockablePane.dll</Assembly>
+    <AddInId>9be8086d-1a4f-42f2-9b7c-b5c8fe1e5040</AddInId>
+    <FullClassName>EOMHub.DockablePane.HubApp</FullClassName>
+    <VendorId>EOM</VendorId>
+    <VendorDescription>Registers UniTools Hub dockable pane at Revit startup.</VendorDescription>
+  </AddIn>
+  <AddIn Type="Command">
+    <Name>UniTools Hub Command</Name>
+    <Text>UniTools Hub</Text>
+    <Assembly>EOMHubDockablePane\EOMHub.DockablePane.dll</Assembly>
+    <FullClassName>EOMHub.DockablePane.Commands.ShowHubCommand</FullClassName>
+    <AddInId>fdf65b97-380a-4b6a-a06c-87a181263d63</AddInId>
+    <VendorId>EOM</VendorId>
+    <VendorDescription>Opens the UniTools Hub dockable pane.</VendorDescription>
+  </AddIn>
+</RevitAddIns>

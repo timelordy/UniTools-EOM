@@ -18,10 +18,10 @@ const StatusBar = memo(function StatusBar({ status }: StatusBarProps) {
       <div className="status-indicator">
         <span className="status-dot" />
         <span className="status-text">
-          {status.connected ? 'Revit подключен' : 'Не подключен'}
+          {status.connected ? 'Подключено' : 'Нет подключения'}
         </span>
       </div>
-      
+
       {status.connected && status.document && (
         <div className="document-info">
           <span className="document-name" title={status.documentPath}>

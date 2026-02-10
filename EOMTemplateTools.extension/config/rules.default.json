@@ -494,5 +494,66 @@
     "storage_light_height_mm":  2700,
     "storage_validate_match_tol_mm":  2000,
     "storage_validate_height_tol_mm":  20,
-    "storage_validate_wall_dist_mm":  100
+    "storage_validate_wall_dist_mm":  100,
+    "floor_panel_type_rules":  [
+                                   {
+                                       "exact_apartments":  3,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-3 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  4,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-4 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  5,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-5 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  6,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-6 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  7,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-7 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  8,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-8 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  9,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-9 36 УХЛ3 IP31 LIGHT IEK"
+                                   },
+                                   {
+                                       "exact_apartments":  10,
+                                       "type_name":  "Корпус встраиваемый металлический ЩЭ-Х серии LIGHT : ЩЭ-10 36 УХЛ3 IP31 LIGHT IEK"
+                                   }
+                               ],
+    "floor_panel_niche_patterns":  [
+                                       "ниша",
+                                       "niche",
+                                       "эом",
+                                       "шахт"
+                                   ],
+    "floor_panel_niche_patterns_single":  [],
+    "floor_panel_height_mm":  1700,
+    "floor_panel_opening_type_names":  [
+                                           "015_Шахта прямоугольная_Отверстия : ЭОМ"
+                                       ],
+    "floor_panel_opening_room_patterns":  [
+                                              "эом"
+                                          ],
+    "floor_panel_min_wall_clearance_mm":  0,
+    "floor_panel_right_edge_nudge_mm":  70,
+    "floor_panel_dedupe_radius_mm":  300,
+    "floor_panel_wall_offset_mm":  500,
+    "floor_panel_use_lateral_vertical_offsets":  false,
+    "floor_panel_lateral_offset_mm":  5000,
+    "floor_panel_vertical_offset_mm":  5000,
+    "floor_panel_opening_offset_x_mm":  0,
+    "floor_panel_opening_offset_y_mm":  0,
+    "floor_panel_opening_offset_z_mm":  0,
+    "floor_panel_manual_offset_x_mm":  0,
+    "floor_panel_manual_offset_y_mm":  0,
+    "floor_panel_manual_offset_z_mm":  0
 }

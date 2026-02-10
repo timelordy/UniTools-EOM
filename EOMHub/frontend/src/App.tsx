@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react'
 import ToolCard from './components/ToolCard'
 import TimeSavingsCounter from './components/TimeSavingsCounter'
+import ExecutionOverlay from './components/ExecutionOverlay'
 import StatusBar from './components/StatusBar'
 
 // Eel interface
@@ -102,36 +103,182 @@ interface TimeSavings {
   }>;
 }
 
+type ConfirmVariant = 'default' | 'danger'
+
+interface ConfirmDialogState {
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+  variant?: ConfirmVariant
+  defaultAction?: 'confirm' | 'cancel'
+}
+
+let eelBridgeFailed = false
+const FORCE_REST_MODE = true
+const EEL_CALL_TIMEOUT_MS = 1200
+const SHOW_RESULT_PANEL = false
+
+const hasEelBridge = () => {
+  if (FORCE_REST_MODE) return false
+  if (typeof window === 'undefined') return false
+  return !eelBridgeFailed && !!window.eel
+}
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`Eel bridge timeout after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((error) => {
+        window.clearTimeout(timer)
+        reject(error)
+      })
+  })
+}
+
+const callEel = async <T,>(invoke: () => Promise<T>): Promise<T | null> => {
+  if (!hasEelBridge()) return null
+  try {
+    return await withTimeout(invoke(), EEL_CALL_TIMEOUT_MS)
+  } catch (error) {
+    eelBridgeFailed = true
+    console.warn('Eel bridge call failed, switching to REST fallback:', error)
+    return null
+  }
+}
+
+const fetchApi = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(path, init)
+  const payload = (await response.json()) as T & { error?: string }
+  if (!response.ok) {
+    throw new Error(payload?.error || `HTTP ${response.status}`)
+  }
+  return payload as T
+}
+
+const getToolsConfig = async (): Promise<ToolsConfig> => {
+  const eelResult = await callEel(() => window.eel.get_tools_config()())
+  if (eelResult) return eelResult
+  return fetchApi<ToolsConfig>('/api/tools-config')
+}
+
+const getRevitStatus = async (): Promise<RevitStatus> => {
+  const eelResult = await callEel(() => window.eel.get_revit_status()())
+  if (eelResult) return eelResult
+  return fetchApi<RevitStatus>('/api/revit-status')
+}
+
+const getTimeSavings = async (): Promise<TimeSavings> => {
+  const eelResult = await callEel(() => window.eel.get_time_savings()())
+  if (eelResult) return eelResult
+  return fetchApi<TimeSavings>('/api/time-savings')
+}
+
+const getJobResult = async (jobId: string): Promise<JobResult | null> => {
+  const eelResult = await callEel(() => window.eel.get_job_result(jobId)())
+  if (eelResult) return eelResult
+  return fetchApi<JobResult | null>(`/api/job-result/${encodeURIComponent(jobId)}`)
+}
+
+const runTool = async (toolId: string, jobId?: string): Promise<RunResult> => {
+  const eelResult = await callEel(() => window.eel.run_tool(toolId, jobId)())
+  if (eelResult) return eelResult
+  return fetchApi<RunResult>('/api/run-tool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolId, jobId }),
+  })
+}
+
+const resetTimeSavings = async (): Promise<TimeSavings> => {
+  const eelResult = await callEel(() => window.eel.reset_time_savings()())
+  if (eelResult) return eelResult
+  return fetchApi<TimeSavings>('/api/reset-time-savings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+}
+
+const addTimeSaving = async (
+  toolId: string,
+  minutes: number | { min: number; max: number },
+): Promise<TimeSavings> => {
+  const eelResult = await callEel(() => window.eel.add_time_saving(toolId, minutes)())
+  if (eelResult) return eelResult
+  return fetchApi<TimeSavings>('/api/add-time-saving', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolId, minutes }),
+  })
+}
+
 function App() {
   const [config, setConfig] = useState<ToolsConfig | null>(null)
   const [status, setStatus] = useState<RevitStatus>({ connected: false })
   const [savings, setSavings] = useState<TimeSavings>({ totalSeconds: 0, executed: {}, history: [] })
+  const configLoadedRef = useRef(false)
   const [, setRunningTool] = useState<string | null>(null)
   const [pendingJobIds, setPendingJobIds] = useState<string[]>([])
   const [jobMetaById, setJobMetaById] = useState<Record<string, { toolId: string; minutes: number }>>({})
   const [countedJobIds, setCountedJobIds] = useState<Record<string, true>>({})
+  const [jobDisplayNameById, setJobDisplayNameById] = useState<Record<string, string>>({})
+  const jobRunCountersRef = useRef<Record<string, number>>({})
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  const [showConnectionHelp, setShowConnectionHelp] = useState(false)
   const [lastTool, setLastTool] = useState<Tool | null>(null)
   const [lastJobId, setLastJobId] = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle')
   const [jobResult, setJobResult] = useState<JobResult | null>(null)
   const [jobMessage, setJobMessage] = useState<string>('')
   const [resultTab, setResultTab] = useState<'result' | 'logs'>('result')
+  const [overlayJobId, setOverlayJobId] = useState<string | null>(null)
+  const overlayHideTimerRef = useRef<number | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
+  const confirmResolveRef = useRef<((value: boolean) => void) | null>(null)
+
+  const requestConfirm = useCallback((next: ConfirmDialogState) => {
+    return new Promise<boolean>((resolve) => {
+      confirmResolveRef.current = resolve
+      setConfirmDialog(next)
+    })
+  }, [])
+
+  const closeConfirm = useCallback((value: boolean) => {
+    const resolve = confirmResolveRef.current
+    confirmResolveRef.current = null
+    setConfirmDialog(null)
+    resolve?.(value)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      const resolve = confirmResolveRef.current
+      confirmResolveRef.current = null
+      resolve?.(false)
+    }
+  }, [])
 
   // Load config and status
   useEffect(() => {
     const loadData = async () => {
       try {
-        if (window.eel) {
-          const cfg = await window.eel.get_tools_config()()
-          setConfig(cfg)
+        const cfg = await getToolsConfig()
+        setConfig(cfg)
+        configLoadedRef.current = true
 
-          const st = await window.eel.get_revit_status()()
-          setStatus(st)
+        const st = await getRevitStatus()
+        setStatus(st)
 
-          const sv = await window.eel.get_time_savings()()
-          setSavings(sv)
-        }
+        const sv = await getTimeSavings()
+        setSavings(sv)
       } catch (e) {
         console.error('Failed to load data:', e)
       }
@@ -141,13 +288,20 @@ function App() {
 
     // Poll status every 5 seconds
     const interval = setInterval(async () => {
-      if (window.eel) {
-        try {
-          const st = await window.eel.get_revit_status()()
-          setStatus(st)
-        } catch {
-          // ignore
+      try {
+        if (!configLoadedRef.current) {
+          const cfg = await getToolsConfig()
+          setConfig(cfg)
+          configLoadedRef.current = true
+
+          const sv = await getTimeSavings()
+          setSavings(sv)
         }
+
+        const st = await getRevitStatus()
+        setStatus(st)
+      } catch {
+        // ignore
       }
     }, 5000)
 
@@ -156,8 +310,6 @@ function App() {
 
   // Poll all queued jobs so tools are independent.
   useEffect(() => {
-    if (!window.eel) return
-
     let stopped = false
 
     const poll = async () => {
@@ -170,7 +322,7 @@ function App() {
         const results = await Promise.all(
           jobIds.map(async (jobId) => {
             try {
-              const res = await window.eel.get_job_result(jobId)()
+              const res = await getJobResult(jobId)
               return { jobId, res }
             } catch (e) {
               return { jobId, res: { job_id: jobId, tool_id: '', status: 'error', error: (e as Error).message } as JobResult }
@@ -235,7 +387,7 @@ function App() {
 
             if (minutesMin != null && minutesMax != null && minutesMax > 0 && toolIdForSaving) {
               try {
-                const newSavings = await window.eel.add_time_saving(toolIdForSaving, { min: minutesMin, max: minutesMax })()
+                const newSavings = await addTimeSaving(toolIdForSaving, { min: minutesMin, max: minutesMax })
                 setSavings(newSavings)
               } catch {
                 // ignore
@@ -282,13 +434,61 @@ function App() {
     return ids
   }, [pendingJobIds, jobMetaById])
 
-  const handleRunTool = useCallback(async (tool: Tool) => {
-    if (!window.eel) return
+  const queueLabel = useMemo(() => {
+    const queueSize = pendingJobIds.length
+    if (queueSize <= 1) return null
+    const others = queueSize - 1
+    return `В очереди: ${others}`
+  }, [pendingJobIds])
 
+  const friendlyJobName = useMemo(() => {
+    if (!lastJobId) return null
+    return jobDisplayNameById[lastJobId] || null
+  }, [lastJobId, jobDisplayNameById])
+
+  useEffect(() => {
+    if (overlayHideTimerRef.current != null) {
+      window.clearTimeout(overlayHideTimerRef.current)
+      overlayHideTimerRef.current = null
+    }
+
+    if (!lastTool || !lastJobId) {
+      setOverlayJobId(null)
+      return
+    }
+
+    if (jobStatus === 'pending' || jobStatus === 'running') {
+      setOverlayJobId(lastJobId)
+      return
+    }
+
+    if (jobStatus === 'completed') {
+      setOverlayJobId(lastJobId)
+      overlayHideTimerRef.current = window.setTimeout(() => {
+        setOverlayJobId((current) => (current === lastJobId ? null : current))
+        overlayHideTimerRef.current = null
+      }, 1300)
+      return
+    }
+
+    // Default: don't show overlay for other states.
+    setOverlayJobId(null)
+  }, [jobStatus, lastJobId, lastTool])
+
+  const overlayVisible = Boolean(lastTool && overlayJobId && overlayJobId === lastJobId)
+
+  useEffect(() => {
+    if (status.connected) {
+      setShowConnectionHelp(false)
+    }
+  }, [status.connected])
+
+  const handleRunTool = useCallback(async (tool: Tool) => {
     if (!status.connected) {
       setLastTool(tool)
       setJobStatus('error')
       setJobMessage('Revit не готов. Откройте проект и нажмите кнопку Hub в Revit, затем повторите.')
+      setShowConnectionHelp(true)
       setResultTab('result')
       return
     }
@@ -296,7 +496,15 @@ function App() {
     // Check for dangerous tools
     if (config?.dangerous_tools?.includes(tool.id)) {
       const msg = config.warning_messages?.[tool.id] || config.warning_messages?.default || 'Продолжить?'
-      if (!confirm(msg)) return
+      const ok = await requestConfirm({
+        title: 'Требуется подтверждение',
+        message: msg,
+        confirmLabel: 'Продолжить',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+        defaultAction: 'cancel',
+      })
+      if (!ok) return
     }
 
     // Запуск не блокирует другие инструменты: можно ставить в очередь несколько задач.
@@ -309,7 +517,7 @@ function App() {
     setResultTab('result')
 
     try {
-      const result = await window.eel.run_tool(tool.id)()
+      const result = await runTool(tool.id)
 
       if (result.success) {
         setLastJobId(result.job_id || null)
@@ -318,6 +526,12 @@ function App() {
         if (jobId) {
           setPendingJobIds((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]))
           setJobMetaById((prev) => ({ ...prev, [jobId]: { toolId: tool.id, minutes: tool.time_saved } }))
+          const baseName = tool.name?.trim() || 'Задача'
+          const prevCount = jobRunCountersRef.current[tool.id] || 0
+          const nextCount = prevCount + 1
+          jobRunCountersRef.current = { ...jobRunCountersRef.current, [tool.id]: nextCount }
+          const computedFriendlyName = `${baseName}_${nextCount}`
+          setJobDisplayNameById((prev) => ({ ...prev, [jobId]: computedFriendlyName }))
         }
       } else {
         setLastJobId(null)
@@ -332,30 +546,39 @@ function App() {
       setJobMessage((e as Error).message || 'Не удалось отправить команду в Revit')
       setRunningTool(null)
     }
-  }, [config, status.connected])
+  }, [config, requestConfirm, status.connected])
 
   const handleResetSavings = useCallback(async () => {
-    if (!window.eel) return
-    if (!confirm('Сбросить весь прогресс экономии времени?')) return
+    const ok = await requestConfirm({
+      title: 'Сбросить прогресс?',
+      message: 'Сбросить всю статистику экономии времени? Данные нельзя восстановить.',
+      confirmLabel: 'Сбросить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+      defaultAction: 'cancel',
+    })
+    if (!ok) return
 
     try {
-      const newSavings = await window.eel.reset_time_savings()()
+      const newSavings = await resetTimeSavings()
       setSavings(newSavings)
     } catch (e) {
       console.error('Failed to reset savings:', e)
     }
-  }, [])
+  }, [requestConfirm])
 
   const handleCancel = useCallback(async () => {
-    if (!window.eel) return
     if (!jobStatus || jobStatus === 'completed' || jobStatus === 'error' || jobStatus === 'cancelled') return
 
     try {
       // Send cancel command with current job ID if available, or just generic cancel
       // Based on script.py logic, "run:cancel:jobId" is handled.
       // run_tool('cancel', lastJobId) -> "run:cancel:lastJobId"
-      await window.eel.run_tool('cancel', lastJobId || undefined)()
-      setJobStatus('cancelled')
+      if (lastJobId) {
+        await runTool('cancel', lastJobId)
+      } else {
+        await runTool('cancel')
+      }
       setJobMessage('Запрос на отмену отправлен...')
     } catch (e) {
       console.error('Failed to cancel:', e)
@@ -414,14 +637,12 @@ function App() {
 
   return (
     <div className="app">
-      <header className="header">
-        <div className="header-content">
-          <div className="logo">
-            <span className="logo-text">UniTools</span>
-            <span className="logo-icon">EOM</span>
-          </div>
-          <StatusBar status={status} />
+      <header className="hub-top-bar">
+        <div className="hub-brand">
+          <span className="hub-brand-title">UniTools</span>
+          <span className="hub-brand-chip">EOM</span>
         </div>
+        <StatusBar status={status} />
       </header>
 
       <main className="main">
@@ -448,6 +669,27 @@ function App() {
           ))}
         </div>
 
+        {!status.connected && (
+          <section className="connection-help-card" role="status" aria-live="polite">
+            <h2 className="connection-help-title">Подключите Revit, чтобы запускать инструменты</h2>
+            <p className="connection-help-text">Откройте проект в Revit и нажмите кнопку Hub на панели pyRevit.</p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowConnectionHelp((prev) => !prev)}
+            >
+              {showConnectionHelp ? 'Скрыть инструкцию' : 'Как подключиться'}
+            </button>
+            {showConnectionHelp && (
+              <ol className="connection-help-steps">
+                <li>Откройте нужный проект в Revit.</li>
+                <li>На вкладке pyRevit нажмите кнопку Hub.</li>
+                <li>Дождитесь статуса «Подключено» и запустите инструмент.</li>
+              </ol>
+            )}
+          </section>
+        )}
+
         <div className="tools-container">
           {filteredCategories.map(category => (
             <section key={category.id} className="category-section">
@@ -472,30 +714,23 @@ function App() {
           ))}
         </div>
 
-        <section className="result-panel">
+	    {SHOW_RESULT_PANEL && (
+	      <section className="result-panel">
           <div className="result-header">
             <div className="result-title">
               <span>Результат запуска</span>
               {lastTool && <span className="result-tool">{lastTool.name}</span>}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="result-header-actions">
               <div className={`result-status status-${jobStatus}`}>
                 {jobStatusLabel}
               </div>
               {(jobStatus === 'running' || jobStatus === 'pending') && (
                 <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
                   onClick={handleCancel}
                   title="Отменить выполнение"
-                  style={{
-                    background: '#fee2e2',
-                    border: '1px solid #ef4444',
-                    color: '#ef4444',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    padding: '2px 8px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                  }}
                 >
                   ОТМЕНА
                 </button>
@@ -512,7 +747,7 @@ function App() {
           {lastJobId && (
             <>
               <div className="result-meta">
-                <span className="result-meta-item">Job: {lastJobId}</span>
+                <span className="result-meta-item" title={lastJobId || undefined}>Задача: {friendlyJobName || lastJobId}</span>
                 {jobResult?.executionTime != null && (
                   <span className="result-meta-item" style={{ fontWeight: 'bold', color: '#4CAF50' }}>
                     ⏱ Время: {Math.round(jobResult.executionTime * 10) / 10} сек
@@ -596,8 +831,128 @@ function App() {
               </div>
             </>
           )}
-        </section>
-      </main>
+	      </section>
+	    )}
+	  </main>
+      <ExecutionOverlay
+        visible={overlayVisible}
+        status={jobStatus}
+        toolId={lastTool?.id}
+        toolName={lastTool?.name}
+        jobId={lastJobId}
+        jobDisplayName={friendlyJobName}
+        message={jobMessage}
+        queueLabel={queueLabel}
+        stats={jobResult?.stats || resolvedStats || null}
+        summary={jobResult?.summary || null}
+        canCancel={jobStatus === 'pending' || jobStatus === 'running'}
+        onCancel={handleCancel}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title || ''}
+        message={confirmDialog?.message || ''}
+        confirmLabel={confirmDialog?.confirmLabel}
+        cancelLabel={confirmDialog?.cancelLabel}
+        variant={confirmDialog?.variant}
+        defaultAction={confirmDialog?.defaultAction}
+        onConfirm={() => closeConfirm(true)}
+        onCancel={() => closeConfirm(false)}
+      />
+    </div>
+  )
+}
+
+function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel,
+  cancelLabel,
+  variant,
+  defaultAction,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean
+  title: string
+  message: string
+  confirmLabel?: string
+  cancelLabel?: string
+  variant?: ConfirmVariant
+  defaultAction?: 'confirm' | 'cancel'
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const confirmRef = useRef<HTMLButtonElement | null>(null)
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
+  const baseId = useId()
+  const titleId = `${baseId}-title`
+  const messageId = `${baseId}-message`
+
+  useEffect(() => {
+    if (!open) return
+    const shouldConfirm = (defaultAction || 'cancel') === 'confirm'
+    const target = shouldConfirm ? confirmRef.current : cancelRef.current
+    target?.focus()
+  }, [open, defaultAction])
+
+  useEffect(() => {
+    if (!open) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCancel()
+        return
+      }
+      if (event.key !== 'Enter') return
+
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+
+      event.preventDefault()
+      const preferConfirm = (defaultAction || 'cancel') === 'confirm'
+      if (preferConfirm) onConfirm()
+      else onCancel()
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [defaultAction, onCancel, onConfirm, open])
+
+  if (!open) return null
+
+  const confirmText = confirmLabel || 'OK'
+  const cancelText = cancelLabel || 'Cancel'
+  const confirmClass = variant === 'danger' ? 'btn btn-danger' : 'btn btn-secondary'
+  const isDanger = variant === 'danger'
+
+  return (
+    <div className="apply-progress-overlay confirm-overlay" onClick={onCancel}>
+      <div
+        className="apply-progress-dialog confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={messageId}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div id={titleId} className="confirm-title">
+          {isDanger ? <span className="confirm-icon" aria-hidden="true">⚠</span> : null}
+          <span>{title}</span>
+        </div>
+        <div id={messageId} className="confirm-message">{message}</div>
+        <div className="confirm-actions">
+          <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={onCancel}>
+            {cancelText}
+          </button>
+          <button ref={confirmRef} type="button" className={confirmClass} onClick={onConfirm}>
+            {confirmText}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

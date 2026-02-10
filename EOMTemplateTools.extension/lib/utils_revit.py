@@ -21,7 +21,7 @@ def _safe_log(logger_method, msg):
         logger_method(msg)
     except UnicodeEncodeError:
         try:
-            # Fallback to repr which escapes non-ascii
+            # Fallback на repr который экранирует non-ascii
             logger_method(repr(msg))
         except Exception:
             logger_method("<Log message encoding failed>")
@@ -33,7 +33,7 @@ def alert(msg, title='EOM Template Tools', warn_icon=True):
     try:
         forms.alert(msg, title=title, warn_icon=warn_icon)
     except Exception:
-        # As a last resort if UI is unavailable
+        # Крайняя мера если UI недоступен
         _safe_log(get_logger().warning, msg)
 
 
@@ -44,9 +44,9 @@ def log_exception(prefix='Error'):
 
 
 def trace(msg, filename='EOMTemplateTools.trace.log'):
-    """Write breadcrumb to a local file.
+    """Записать breadcrumb в локальный файл.
 
-    Use this when Revit crashes hard before pyRevit output is flushed.
+    Используйте это когда Revit жёстко крашится до того, как вывод pyRevit будет сброшен.
     """
     return
 
@@ -62,7 +62,7 @@ def safe_str(obj):
 
 
 def find_nearest_level(doc, z_ft):
-    """Return nearest Level by elevation to given Z (feet)."""
+    """Вернуть ближайший Level по отметке к заданной Z (футы)."""
     from pyrevit import DB
 
     levels = list(DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements())
@@ -89,7 +89,7 @@ def ensure_symbol_active(doc, family_symbol):
             family_symbol.Activate()
             doc.Regenerate()
     except Exception:
-        # Some types don't expose IsActive/Activate reliably
+        # Некоторые типы не раскрывают IsActive/Activate надёжно
         pass
 
 
@@ -121,7 +121,7 @@ def set_comments(elem, value):
     if elem is None:
         return False
 
-    # Prefer built-in parameter if available
+    # Предпочитать встроенный параметр если доступен
     try:
         p = elem.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
         if p and (not p.IsReadOnly):
@@ -130,7 +130,7 @@ def set_comments(elem, value):
     except Exception:
         pass
 
-    # Fallback by name
+    # Fallback по имени
     if set_string_param(elem, 'Comments', value):
         return True
     if set_string_param(elem, u'\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0438', value):
@@ -156,10 +156,10 @@ def set_mark(elem, value):
 
 
 def tx(name, doc=None, swallow_warnings=False):
-    """Transaction context manager.
+    """Контекст-менеджер транзакции.
 
-    Usage:
-        with tx('My Tool'):
+    Использование:
+        with tx('Мой Инструмент'):
             ...
     """
     doc = doc or revit.doc
@@ -215,7 +215,7 @@ def tx(name, doc=None, swallow_warnings=False):
             try:
                 t.Commit()
             except Exception:
-                # Last resort rollback
+                # Крайняя мера rollback
                 rb = getattr(t, 'Rollback', None) or getattr(t, 'RollBack', None)
                 if rb:
                     try:

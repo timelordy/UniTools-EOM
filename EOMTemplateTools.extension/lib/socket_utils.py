@@ -16,7 +16,7 @@ def _is_socket_instance(inst):
             if cid not in (int(DB.BuiltInCategory.OST_ElectricalFixtures), int(DB.BuiltInCategory.OST_ElectricalEquipment)):
                 return False
     except: return False
-    # Optional: check if it's really a socket by family name or parameters if needed
+    # Дополнительно: проверить, является ли это действительно розеткой по имени семейства или параметрам, если необходимо
     return True
 
 def _norm(s):
@@ -35,7 +35,7 @@ def _norm_type_key(s):
         repl = {u'а': u'a', u'в': u'b', u'е': u'e', u'з': u'3', u'к': u'k', u'м': u'm', u'н': u'h', u'о': u'o', u'р': u'p', u'с': u'c', u'т': u't', u'у': u'y', u'х': u'x', u'п': u'n'}
         for k, v in repl.items(): t = t.replace(k, v)
     except: pass
-    # Common mixed Cyrillic/Latin variants in vendor naming
+    # Общие смешанные кириллические/латинские варианты в именовании поставщиков
     try:
         t = t.replace(u'р3т', u'p3t')
         t = t.replace(u'рзт', u'p3t')
@@ -129,11 +129,11 @@ def _room_text(room):
 
 def get_room_apartment_number(room):
     """
-    Extract apartment number from room.
-    Strategy:
-    1. Check 'Квартира' parameter (Explicit is best).
-    2. Check 'Department' (BuiltInParameter.ROOM_DEPARTMENT).
-    3. Check 'Number' (BuiltInParameter.ROOM_NUMBER) splitting by dot.
+    Извлечь номер квартиры из помещения.
+    Стратегия:
+    1. Проверить параметр 'Квартира' (Явное предпочтительнее).
+    2. Проверить 'Department' (BuiltInParameter.ROOM_DEPARTMENT).
+    3. Проверить 'Number' (BuiltInParameter.ROOM_NUMBER), разделяя по точке.
     """
     if room is None: return None
 
@@ -141,7 +141,7 @@ def get_room_apartment_number(room):
         if not val: return False
         v = val.strip().lower()
         if not v: return False
-        # Reject generic words
+        # Отклонить общие слова
         if v in [u'квартира', u'apartment', u'flat', u'room', u'моп']: return False
         # Must contain at least one digit to be a valid apartment number
         return any(c.isdigit() for c in v)
@@ -189,10 +189,10 @@ def _clean_apt_number(val):
 
 
 def _room_is_wc(room, rules=None):
-    """Best-effort: detect WC/Sanuzel by room text.
+    """Best-effort: определить WC/Санузел по тексту помещения.
 
-    Uses rules['wet_room_name_patterns'] when provided; falls back to a robust
-    built-in set that catches 'Сан. узел' variations.
+    Использует rules['wet_room_name_patterns'] если предоставлено; в противном случае
+    использует надежный встроенный набор, который распознает вариации 'Сан. узел'.
     """
     txt = _room_text(room)
     patterns = None
@@ -459,11 +459,11 @@ def _elem_text(e):
     parts = []
     try: parts.append(getattr(e, 'Name', u'') or u'')
     except: pass
-    # Include instance mark to support short labels like "BK" used for boilers/fixtures.
+    # Включить марку экземпляра для поддержки коротких меток, таких как "БК", используемых для котлов/приборов.
     try:
         parts.append(_get_param_as_string(e, bip=DB.BuiltInParameter.ALL_MODEL_MARK, name=u'Марка'))
     except: pass
-    # Common shared params in RU templates (+ some text/name-like params often used in annotations)
+    # Общие общие параметры в русских шаблонах (+ некоторые текстовые/именные параметры, часто используемые в аннотациях)
     for nm in (
         u'ADSK_Марка', u'ADSK_Mark', u'BS_Марка', u'BS_Mark', u'Mark',
         u'Код', u'Code',
@@ -522,10 +522,10 @@ def _collect_textnote_points(link_doc, keys):
 
 
 def _collect_independent_tag_points(link_doc, keys, allowed_bics=None):
-    """Collect points for IndependentTag elements whose TagText matches keys.
+    """Собирает точки для элементов IndependentTag, чей TagText соответствует ключам.
 
-    Many AR models place equipment marks like "BK/БК" or "ПС" via tags rather
-    than TextNotes or modeled families.
+    Многие АР-модели размещают марки оборудования, такие как "BK/БК" или "ПС",
+    с помощью тегов, а не TextNotes или смоделированных семейств.
     """
     pts = []
     if link_doc is None or not keys:
@@ -590,7 +590,8 @@ def _collect_independent_tag_points(link_doc, keys, allowed_bics=None):
                 continue
 
             pt = None
-            # Prefer tagged element center when available (tag head can be moved arbitrarily).
+            # Предпочитать центр элемента, к которому прикреплен тег, если доступен
+            # (голова тега может быть перемещена произвольно).
             host_ids = []
             try:
                 host_ids = list(tag.GetTaggedLocalElementIds() or [])
@@ -648,7 +649,7 @@ def _text_has_any_keyword(norm_text, keys):
 
     tokens = None
     for nk in key_norms:
-        # Short keys like "bk" should match as a token (avoid false positives like substrings).
+    # Короткие ключи, такие как "bk", должны совпадать как токен (избегать ложных срабатываний, таких как подстроки).
         if len(nk) <= 2:
             if tokens is None:
                 try:
@@ -657,7 +658,7 @@ def _text_has_any_keyword(norm_text, keys):
                     tokens = []
             if nk in tokens:
                 return True
-            # Also allow BK1, BK2 ... patterns commonly used in marks.
+            # Также разрешить шаблоны BK1, BK2 ..., обычно используемые в марках.
             try:
                 for tok in tokens:
                     if tok.startswith(nk) and tok[len(nk):].isdigit():
@@ -709,7 +710,7 @@ def _collect_sinks_points(link_doc, rules):
 
     pts = []
 
-    # Model elements
+    # Элементы модели
     bics_model = [
         DB.BuiltInCategory.OST_PlumbingFixtures,
         DB.BuiltInCategory.OST_Casework,
@@ -718,7 +719,7 @@ def _collect_sinks_points(link_doc, rules):
         DB.BuiltInCategory.OST_SpecialityEquipment,
         DB.BuiltInCategory.OST_MechanicalEquipment,
     ]
-    # Optional categories (avoid hard dependency)
+    # Необязательные категории (избегать жесткой зависимости)
     for nm in ('OST_FoodServiceEquipment',):
         try:
             bic = getattr(DB.BuiltInCategory, nm, None)
@@ -729,10 +730,10 @@ def _collect_sinks_points(link_doc, rules):
 
     for bic in bics_model:
         pts.extend(_collect_points_by_keywords(link_doc, strong_keys, bic))
-        # Marks like "МК" are sometimes stored in Mark/Tag for sink family.
+        # Марки типа "МК" иногда хранятся в Mark/Tag для семейств раковин.
         pts.extend(_collect_points_by_keywords(link_doc, mark_keys, bic))
 
-    # Annotation symbols (FamilyInstance-based). Accept short marks only when label is short.
+    # Аннотационные символы (на основе FamilyInstance). Принимать короткие марки только тогда, когда метка короткая.
     for bic in (DB.BuiltInCategory.OST_GenericAnnotation, DB.BuiltInCategory.OST_DetailComponents):
         try:
             col = DB.FilteredElementCollector(link_doc).OfCategory(bic).WhereElementIsNotElementType()
@@ -831,26 +832,26 @@ def _collect_sinks_points(link_doc, rules):
 
 
 def _collect_stoves_points(link_doc, rules):
-    """Collect electric stove/cooktop points in linked AR.
+    """Собирает точки электрических плит/варочных панелей в связанном АР.
 
-    Uses both model elements and annotations (TextNotes/IndependentTags).
+    Использует как элементы модели, так и аннотации (TextNotes/IndependentTags).
     """
     if link_doc is None:
         return []
 
-    # Strong keywords likely to appear in model element names/marks.
+    # Сильные ключевые слова, которые, вероятно, появятся в названиях/марках элементов модели.
     strong_keys = (
         rules.get('stove_family_keywords', None)
         or rules.get('stove_keywords', None)
         or [u'плит', u'вароч', u'электроплит', u'варочная', u'cooktop', u'stove', u'oven', u'range', u'hob']
     )
 
-    # Short plan marks often used in tags/text.
+    # Короткие марки на плане, часто используемые в тегах/тексте.
     mark_keys = rules.get('stove_mark_keywords', None) or [u'эп']
 
     pts = []
 
-    # Model elements
+    # Элементы модели
     for bic in (
         DB.BuiltInCategory.OST_SpecialityEquipment,
         DB.BuiltInCategory.OST_MechanicalEquipment,
@@ -863,7 +864,7 @@ def _collect_stoves_points(link_doc, rules):
         pts.extend(_collect_points_by_keywords(link_doc, strong_keys, bic))
         pts.extend(_collect_points_by_keywords(link_doc, mark_keys, bic))
 
-    # Annotation symbols (FamilyInstance-based). Accept marks only for short labels.
+    # Аннотационные символы (на основе FamilyInstance). Принимать марки только для коротких меток.
     for bic in (DB.BuiltInCategory.OST_GenericAnnotation, DB.BuiltInCategory.OST_DetailComponents):
         try:
             col = DB.FilteredElementCollector(link_doc).OfCategory(bic).WhereElementIsNotElementType()
@@ -964,9 +965,9 @@ def _collect_stoves_points(link_doc, rules):
 
 
 def _collect_fridges_points(link_doc, rules):
-    """Collect fridge/refrigerator points in linked AR.
+    """Собирает точки холодильников в связанном АР.
 
-    Uses both model elements and annotations (TextNotes/IndependentTags).
+    Использует как элементы модели, так и аннотации (TextNotes/IndependentTags).
     """
     if link_doc is None:
         return []
@@ -977,7 +978,7 @@ def _collect_fridges_points(link_doc, rules):
         or [u'холод', u'холодил', u'fridge', u'refriger', u'refrigerator', u'freezer']
     )
 
-    # Avoid short mark matching for fridges by default (too many false positives).
+    # Избегать сопоставления коротких марок для холодильников по умолчанию (слишком много ложных срабатываний).
     mark_keys = rules.get('fridge_mark_keywords', None) or []
 
     pts = []
@@ -1104,14 +1105,14 @@ def _collect_washing_machines_points(link_doc, rules):
     if link_doc is None:
         return []
 
-    # Strong keywords likely to appear in model element names/marks.
+    # Сильные ключевые слова, которые, вероятно, появятся в названиях/марках элементов модели.
     strong_keys = rules.get('washing_machine_keywords', []) or [u'стирал', u'washing', u'machine']
-    # Short plan marks often used in tags/text (avoid substring matching; _text_has_any_keyword is token-aware).
+    # Короткие марки на плане часто используются в тегах/тексте (избегать сопоставления подстрок; _text_has_any_keyword учитывает токены).
     mark_keys = rules.get('washing_machine_mark_keywords', None) or [u'см', u'wm']
 
     pts = []
 
-    # Model elements
+    # Элементы модели
     for bic in (
         DB.BuiltInCategory.OST_PlumbingFixtures,
         DB.BuiltInCategory.OST_SpecialityEquipment,
@@ -1122,7 +1123,7 @@ def _collect_washing_machines_points(link_doc, rules):
         pts.extend(_collect_points_by_keywords(link_doc, strong_keys, bic))
         pts.extend(_collect_points_by_keywords(link_doc, mark_keys, bic))
 
-    # Annotation symbols (FamilyInstance-based). Accept marks only for short labels.
+    # Аннотационные символы (на основе FamilyInstance). Принимать марки только для коротких меток.
     for bic in (DB.BuiltInCategory.OST_GenericAnnotation, DB.BuiltInCategory.OST_DetailComponents):
         try:
             col = DB.FilteredElementCollector(link_doc).OfCategory(bic).WhereElementIsNotElementType()
@@ -1158,7 +1159,7 @@ def _collect_washing_machines_points(link_doc, rules):
             if pt:
                 pts.append(pt)
 
-    # TextNotes: accept strong keywords; accept marks only when the text is a simple short mark (e.g. "СМ", "СМ1").
+    # TextNotes: принимать сильные ключевые слова; принимать марки только тогда, когда текст представляет собой простую короткую марку (например, "СМ", "СМ1").
     try:
         tn_col = DB.FilteredElementCollector(link_doc).OfClass(DB.TextNote)
         for tn in tn_col:
@@ -1176,7 +1177,7 @@ def _collect_washing_machines_points(link_doc, rules):
                 ok = False
             if not ok:
                 try:
-                    # Marks like "см" are ambiguous in general notes; accept only if the note is short.
+                    # Марки типа "см" неоднозначны в общих примечаниях; принимать только если примечание короткое.
                     tnorm = _norm(txt)
                     tokens = re.findall(u'[a-zа-я0-9]+', tnorm) if tnorm else []
                     if tokens and len(tokens) <= 2 and _text_has_any_keyword(txt, mark_keys):
@@ -1222,22 +1223,22 @@ def _collect_washing_machines_points(link_doc, rules):
     return pts
 
 def _collect_boilers_points(link_doc):
-    # Strong, unambiguous boiler keywords.
+    # Сильные, однозначные ключевые слова бойлера.
     strong_keys = [
         u'boiler', u'boyler',
         u'water heater', u'waterheater', u'water_heater',
         u'vodonagrevatel', u'водонагреватель', u'водонагрев', u'водонагр', u'водонагрeв',
         u'бойлер'
     ]
-    # Short marks like BK/БК are ambiguous in model elements (can appear on сантехника),
-    # so we only accept them in annotations/text or in mech/specialty equipment.
+    # Короткие марки, такие как BK/БК, неоднозначны в элементах модели (могут появляться на сантехнике),
+    # поэтому мы принимаем их только в аннотациях/тексте или в механическом/специальном оборудовании.
     mark_keys = [u'bk', u'бк']
 
     strong_pts = []
     mark_pts = []
     ann_pts = []
 
-    # Model elements by strong keywords.
+    # Элементы модели by strong keywords.
     for bic in (
         DB.BuiltInCategory.OST_MechanicalEquipment,
         DB.BuiltInCategory.OST_SpecialityEquipment,
@@ -1248,7 +1249,7 @@ def _collect_boilers_points(link_doc):
     ):
         strong_pts.extend(_collect_points_by_keywords(link_doc, strong_keys, bic))
 
-    # Model elements by mark only.
+    # Элементы модели by mark only.
     # Default: exclude PlumbingFixtures to avoid WC false-positives.
     for bic in (
         DB.BuiltInCategory.OST_MechanicalEquipment,
@@ -1293,7 +1294,7 @@ def _collect_boilers_points(link_doc):
     return strong_pts + mark_pts + ann_pts
 
 def _collect_towel_rails_points(link_doc):
-    # Include common abbreviations used in plans/tags: "ПС" (полотенцесушитель).
+    # Включает общие аббревиатуры, используемые в планах/тегах: "ПС" (полотенцесушитель).
     keys = [
         u'polotence', u'sushitel', u'towel', u'dryer',
         u'сушител', u'полотенце', u'полотенцесуш',
@@ -1313,7 +1314,7 @@ def _collect_towel_rails_points(link_doc):
     ):
         pts.extend(_collect_points_by_keywords(link_doc, keys, bic))
 
-    # Some projects annotate rails as text; support TextNotes too.
+    # Некоторые проекты аннотируют рейки как текст; также поддерживают TextNotes.
     pts.extend(_collect_textnote_points(link_doc, keys))
 
     # Tags (IndependentTag)
@@ -1344,7 +1345,7 @@ def _collect_toilets_data(link_doc):
     data = []
     if not link_doc: return data
     
-    # Keywords for toilets (WC)
+    # Ключевые слова для унитазов (WC)
     keys = [u'унитаз', u'toilet', u'wc', u'closet', u'инсталляция', u'инсталяция']
     bics = [DB.BuiltInCategory.OST_PlumbingFixtures, DB.BuiltInCategory.OST_GenericModel]
     
@@ -1377,11 +1378,11 @@ def _collect_bathtubs_data(link_doc):
                 if not any(_norm(k) in t for k in keys): continue
                 bb = e.get_BoundingBox(None)
                 if bb:
-                    # Force BoundingBox center for bathtubs, as Insertion Point is often at corner
+    # Принудительно использовать центр BoundingBox для ванн, так как Точка Вставки часто находится в углу
                     p_center = (bb.Min + bb.Max) * 0.5
                     
-                    # Try to find a connector or a special point that indicates the "head" (faucet) side.
-                    # MEP connectors are the most reliable way if families are MEP.
+                    # Попробовать найти коннектор или специальную точку, указывающую на "головную" (смеситель) сторону.
+                    # Соединители MEP являются наиболее надежным способом, если семейства являются MEP.
                     faucet_pt = None
                     try:
                         mep_model = e.MEPModel
@@ -1389,26 +1390,26 @@ def _collect_bathtubs_data(link_doc):
                             connectors = mep_model.ConnectorManager.Connectors
                             if connectors:
                                 for c in connectors:
-                                    # Assume water supply/waste connector is near the faucet/drain side
-                                    # Just picking the first one is often enough for "one-sided" objects like tubs
+                                    # Предположим, что соединитель водоснабжения/канализации находится рядом со смесителем/сливом
+                                    # Выбор первого часто достаточен для "односторонних" объектов, таких как ванны
                                     faucet_pt = c.Origin
                                     break
                     except: pass
                     
-                    # If no connectors, check if location point is significantly offset from center (often insertion is at corner/drain)
+                    # Если нет коннекторов, проверить, значительно ли точка расположения смещена от центра (часто вставка находится в углу/сливе)
                     if not faucet_pt:
                         try:
                             loc = getattr(e, 'Location', None)
                             loc_pt = loc.Point if loc and hasattr(loc, 'Point') else None
                             if loc_pt:
                                 d_from_center = loc_pt.DistanceTo(p_center)
-                                # If insertion point is far from center, it might be the corner/drain side.
-                                # But insertion points are inconsistent. Connectors are better.
-                                # Let's store insertion point as a fallback hint.
+                                # Если точка вставки находится далеко от центра, это может быть угол/сторона слива.
+                                # Но точки вставки непоследовательны. Коннекторы лучше.
+                                # Сохраним точку вставки как подсказку для отката.
                                 faucet_pt = loc_pt
                         except: pass
 
-                    # Store: (CenterPoint, BBoxMin, BBoxMax, FaucetHintPoint)
+                    # Хранить: (CenterPoint, BBoxMin, BBoxMax, FaucetHintPoint)
                     data.append((p_center, bb.Min, bb.Max, faucet_pt))
         except: pass
     return data
@@ -1437,9 +1438,9 @@ def _is_point_near_rect_xy(pt, r_min, r_max, r_ft):
 
 
 def _points_in_room(points, room, padding_ft=0.0):
-    """Filter XYZ points that fall inside a room (+ optional XY padding).
+    """Фильтрует точки XYZ, которые попадают внутрь помещения (+ необязательный отступ XY).
 
-    Uses Room.IsPointInRoom when available; otherwise falls back to bounding box.
+    Использует Room.IsPointInRoom, если доступно; в противном случае использует ограничивающую рамку.
     """
     if not points or room is None:
         return []
@@ -1952,7 +1953,7 @@ def _place_socket_batch(host_doc, link_inst, t, batch, sym_flags, sp_cache, comm
 
             link_ref, proj_pt_link, face_n_link = _get_linked_wall_face_ref_and_point(wall_link, link_inst, pt_link, faces_cache=faces_cache, prefer_n_link=prefer_n_link)
 
-            # If no face found at target height, try searching at different heights (for low placements like ШДУП at 300mm)
+    # Если не найдена грань на целевой высоте, попробовать найти на других высотах (для низких размещений, таких как ШДУП на 300 мм)
             # Strategy: find face at higher elevation to confirm wall geometry exists, then use host wall for actual placement
             found_geometry_at_higher_z = False
             if (proj_pt_link is None) and strict_hosting:

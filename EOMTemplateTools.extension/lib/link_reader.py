@@ -8,6 +8,12 @@ from pyrevit import forms
 import magic_context
 
 
+def _magic_active():
+    try:
+        return bool(magic_context.IS_RUNNING or getattr(magic_context, 'FORCE_SELECTION', False))
+    except Exception:
+        return False
+
 def list_link_instances(doc):
     return list(DB.FilteredElementCollector(doc)
                 .OfClass(DB.RevitLinkInstance)
@@ -37,8 +43,206 @@ def get_total_transform(link_instance):
         return DB.Transform.Identity
 
 
+def _norm_key(value):
+    try:
+        import floor_panel_niches as fpn
+        return fpn.normalize_type_key(value)
+    except Exception:
+        try:
+            v = (value or u"")
+            return u" ".join(v.lower().split())
+        except Exception:
+            return u""
+
+
+def _split_family_type(name):
+    if not name:
+        return None, None
+    try:
+        cleaned = u" ".join((name or u"").replace(u":", u" : ").split())
+        parts = [p.strip() for p in cleaned.split(u" : ")]
+        if len(parts) == 1:
+            return None, parts[0]
+        fam = parts[0] or None
+        tname = u" : ".join(parts[1:]).strip()
+        return fam, tname
+    except Exception:
+        return None, name
+
+
+def _get_symbol_type_name(sym):
+    if sym is None:
+        return u""
+
+    try:
+        n = getattr(sym, "Name", None) or u""
+        if n:
+            return n
+    except Exception:
+        pass
+
+    try:
+        name_getter = getattr(DB.Element, 'Name', None)
+    except Exception:
+        name_getter = None
+    if name_getter is not None:
+        try:
+            n = name_getter.GetValue(sym) or u""
+            if n:
+                return n
+        except Exception:
+            pass
+
+    try:
+        p = sym.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
+    except Exception:
+        p = None
+    if p is not None:
+        try:
+            n = p.AsString() or p.AsValueString() or u""
+            if n:
+                return n
+        except Exception:
+            pass
+
+    for pname in ("Type Name", u"Имя типа"):
+        try:
+            p2 = sym.LookupParameter(pname)
+            if p2 is None:
+                continue
+            n = p2.AsString() or p2.AsValueString() or u""
+            if n:
+                return n
+        except Exception:
+            continue
+
+    return u""
+
+
+def iter_family_instances_by_family_type(doc, family_type_names=None, limit=None):
+    """Возвращает FamilyInstance в документе, соответствующий нормализованным правилам 'Family : Type' или 'Type'."""
+    if doc is None:
+        return
+
+    names = list(family_type_names or [])
+    if not names:
+        return
+
+    wanted = []
+    for n in names:
+        fam, typ = _split_family_type(n)
+        wanted.append((_norm_key(fam) if fam else None, _norm_key(typ or n)))
+
+    lim = None
+    try:
+        if limit is not None:
+            lim = int(limit)
+    except Exception:
+        lim = None
+
+    try:
+        col = DB.FilteredElementCollector(doc).OfClass(DB.FamilyInstance).WhereElementIsNotElementType()
+        i = 0
+        for inst in col:
+            try:
+                sym = getattr(inst, 'Symbol', None)
+                if sym is None:
+                    continue
+
+                try:
+                    inst_type = _norm_key(_get_symbol_type_name(sym) or u"")
+                except Exception:
+                    inst_type = u""
+                if not inst_type:
+                    continue
+
+                try:
+                    inst_fam = _norm_key(getattr(sym, 'FamilyName', None) or getattr(sym.Family, 'Name', None) or u"")
+                except Exception:
+                    inst_fam = u""
+
+                ok = False
+                for wfam, wtyp in wanted:
+                    if wtyp and (inst_type == wtyp or (wtyp in inst_type) or (inst_type in wtyp)):
+                        if wfam:
+                            if inst_fam == wfam:
+                                ok = True
+                                break
+                        else:
+                            ok = True
+                            break
+                if not ok:
+                    continue
+
+                yield inst
+                i += 1
+                if lim is not None and i >= lim:
+                    break
+            except Exception:
+                continue
+    except Exception:
+        return
+
+
+def try_get_instance_closed_contour_xy(inst, min_points=3):
+    """Оптимальное усилие: возвращает список точек DB.XYZ (замкнутый контур, последняя точка не повторяется) в координатах экземпляра.
+
+    Источники:
+    - если экземпляр основан на линии (LocationCurve): использовать тесселяцию кривой как контур (редко)
+    - в противном случае: None (заполнитель для более надежного извлечения позже)
+    """
+    if inst is None:
+        return None
+
+    loc = getattr(inst, 'Location', None)
+    curve = getattr(loc, 'Curve', None) if loc else None
+    if curve is None:
+        return None
+
+    try:
+        pts = list(curve.Tessellate())
+    except Exception:
+        pts = None
+    if not pts or len(pts) < int(min_points or 3):
+        return None
+
+    # Ensure we have a closed loop; if not, don't pretend.
+    try:
+        if pts[0].DistanceTo(pts[-1]) > 1e-6:
+            return None
+    except Exception:
+        return None
+
+    try:
+        return pts[:-1]
+    except Exception:
+        return None
+
+
+def get_instance_fallback_point(inst):
+    if inst is None:
+        return None
+
+    loc = getattr(inst, 'Location', None)
+    pt = getattr(loc, 'Point', None) if loc else None
+    if pt:
+        return pt
+
+    try:
+        bb = inst.get_BoundingBox(None)
+        if not bb:
+            return None
+        return DB.XYZ(
+            (float(bb.Min.X) + float(bb.Max.X)) / 2.0,
+            (float(bb.Min.Y) + float(bb.Max.Y)) / 2.0,
+            (float(bb.Min.Z) + float(bb.Max.Z)) / 2.0,
+        )
+    except Exception:
+        return None
+
+
 def try_get_link_path(host_doc, link_instance):
-    """Best-effort: return user-visible path for link, or None."""
+    """Оптимальное усилие: возвращает видимый пользователю путь для связи, или None."""
     try:
         link_type = host_doc.GetElement(link_instance.GetTypeId())
         if link_type is None:
@@ -79,8 +283,8 @@ def list_levels(doc):
 
 
 def select_level(doc, title='Select Level', allow_none=True):
-    # Magic Button check
-    if magic_context.IS_RUNNING and magic_context.SELECTED_LEVELS:
+    # Проверка Magic Button
+    if _magic_active() and magic_context.SELECTED_LEVELS:
         return magic_context.SELECTED_LEVELS[0]
 
     lvls = list_levels(doc)
@@ -113,8 +317,8 @@ def select_level(doc, title='Select Level', allow_none=True):
 
 def select_levels_multi(doc, title='Select Levels (Multi)', default_all=True):
     """Select multiple levels from doc using SelectFromList."""
-    # Magic Button check
-    if magic_context.IS_RUNNING and magic_context.SELECTED_LEVELS:
+    # Проверка Magic Button
+    if _magic_active() and magic_context.SELECTED_LEVELS:
         return list(magic_context.SELECTED_LEVELS)
 
     lvls = list_levels(doc)
@@ -151,26 +355,26 @@ def select_levels_multi(doc, title='Select Levels (Multi)', default_all=True):
 
 
 def select_link_instance_auto(host_doc):
-    """Auto-select the first loaded link instance, or first available if none loaded."""
-    # Magic Button check
-    if magic_context.IS_RUNNING and magic_context.SELECTED_LINK:
+    """Автоматический выбор первого загруженного экземпляра связи или первого доступного, если ни один не загружен."""
+    # Проверка Magic Button
+    if _magic_active() and magic_context.SELECTED_LINK:
         return magic_context.SELECTED_LINK
 
     links = list_link_instances(host_doc)
     if not links:
         return None
     
-    # Prefer loaded links
+    # Предпочитать загруженные связи
     loaded = [ln for ln in links if is_link_loaded(ln)]
     if loaded:
         return loaded[0]
         
-    # Fallback to first link
+    # Fallback к первой связи
     return links[0]
 
 
 def iter_elements_by_category(doc, bic, limit=None, level_id=None):
-    """Yield elements from doc by BuiltInCategory, optionally filtered by LevelId, with optional limit."""
+    """Возвращает элементы из документа по BuiltInCategory, опционально отфильтрованные по LevelId, с опциональным ограничением."""
     if doc is None:
         return
 
@@ -186,10 +390,10 @@ def iter_elements_by_category(doc, bic, limit=None, level_id=None):
                .OfCategory(bic)
                .WhereElementIsNotElementType())
         
-        # Native ElementLevelFilter can be unstable on some link files or if LevelId mismatch occurs.
-        # For safety/stability (especially on "dirty" sessions), we rely on Python-side filtering 
-        # which is slightly slower but much harder to crash.
-        # The 'limit' parameter ensures we don't scan too much anyway.
+        # Native ElementLevelFilter может быть нестабилен на некоторых файлах связей или при несоответствии LevelId.
+        # Для безопасности/стабильности (особенно в "грязных" сессиях) мы полагаемся на фильтрацию на стороне Python,
+        # которая немного медленнее, но гораздо менее подвержена сбоям.
+        # Параметр 'limit' гарантирует, что мы в любом случае не сканируем слишком много.
         
         lid_int = None
         if level_id:
@@ -200,7 +404,7 @@ def iter_elements_by_category(doc, bic, limit=None, level_id=None):
 
         i = 0
         for e in col:
-            # Python fallback filter
+            # Python fallback фильтр
             if lid_int is not None:
                 try:
                     elid = e.LevelId
@@ -244,7 +448,7 @@ def get_room_center(room):
 
 
 def _poly_centroid_xy(pts):
-    """Return (cx, cy) for polygon pts (XYZ) in XY plane."""
+    """Возвращает (cx, cy) для точек полигона (XYZ) в плоскости XY."""
     if not pts or len(pts) < 3:
         return None
 
@@ -312,7 +516,7 @@ def _poly_area_xy(pts):
 
 
 def _point_in_poly_xy(x, y, pts):
-    """Ray casting point-in-polygon in XY. pts are XYZ vertices."""
+    """Трассировка лучей "точка в полигоне" в XY. pts - это вершины XYZ."""
     if not pts or len(pts) < 3:
         return False
     try:
@@ -334,10 +538,10 @@ def _point_in_poly_xy(x, y, pts):
 
 
 def _point_to_room_boundary_dist_xy(x, y, outer_pts, hole_pts_list=None):
-    """Signed distance to room boundary in XY.
+    """Знаковое расстояние до границы помещения в XY.
 
-    Positive when point inside room (inside outer and outside holes), negative otherwise.
-    Magnitude is the min distance to any boundary segment.
+    Положительное, если точка внутри помещения (внутри внешнего контура и вне отверстий), отрицательное в противном случае.
+    Величина — это минимальное расстояние до любого сегмента границы.
     """
     if not outer_pts or len(outer_pts) < 3:
         return -1e9
@@ -416,10 +620,10 @@ class _Cell(object):
 
 
 def _polylabel_xy(outer_pts, hole_pts_list=None, precision=0.2):
-    """Approximate pole of inaccessibility (like mapbox/polylabel) in XY.
+    """Приблизительный полюс недоступности (как mapbox/polylabel) в XY.
 
-    outer_pts / holes are XYZ vertices in room's XY plane.
-    precision is in feet.
+    outer_pts / holes — это вершины XYZ в плоскости XY помещения.
+    precision — в футах.
     """
     if not outer_pts or len(outer_pts) < 3:
         return None, None
@@ -446,7 +650,7 @@ def _polylabel_xy(outer_pts, hole_pts_list=None, precision=0.2):
     if cell_size <= 1e-9:
         return None, None
 
-    # Priority queue (max-heap via negative)
+    # Приоритетная очередь (max-heap через отрицательное значение)
     q = []
     uid = 0
     x = min_x
@@ -459,7 +663,7 @@ def _polylabel_xy(outer_pts, hole_pts_list=None, precision=0.2):
             y += cell_size
         x += cell_size
 
-    # Initial best: centroid if available else bbox center
+    # Начальное лучшее значение: центроид, если доступен, иначе центр ограничивающего параллелепипеда
     best_p = None
     best_d = None
     try:
@@ -479,7 +683,7 @@ def _polylabel_xy(outer_pts, hole_pts_list=None, precision=0.2):
         best_p = (cx, cy)
         best_d = _point_to_room_boundary_dist_xy(cx, cy, outer_pts, holes)
 
-    # Refine
+    # Уточнить
     it = 0
     it_cap = 20000
     while q and it < it_cap:
@@ -507,13 +711,13 @@ def _polylabel_xy(outer_pts, hole_pts_list=None, precision=0.2):
 
 
 def _room_boundary_loop_points(room):
-    """Return best-effort ordered boundary loop points (outer loop) for room."""
+    """Возвращает наилучшие упорядоченные точки контура (внешний контур) для помещения."""
     outer, _ = _room_boundary_loops_points(room)
     return outer
 
 
 def _room_boundary_loops_points(room):
-    """Return (outer_loop_pts, hole_loops_pts_list) as XYZ vertices."""
+    """Возвращает (outer_loop_pts, hole_loops_pts_list) как вершины XYZ."""
     if room is None:
         return None, []
     try:
@@ -543,7 +747,7 @@ def _room_boundary_loops_points(room):
         if not loops:
             return None, []
 
-        # Outer loop = max abs(area); fallback to max perimeter
+        # Внешний цикл = max abs(площадь); fallback к максимальному периметру
         best_i = None
         best_val = None
         for i, pts in enumerate(loops):
@@ -594,7 +798,7 @@ def _closest_point_on_segment_xy(px, py, ax, ay, bx, by):
 
 
 def _min_dist_to_loop_xy(pt, loop_pts):
-    """Return (min_dist, closest_point_xyz) from pt to polygon edges (XY), using loop_pts as vertices."""
+    """Возвращает (min_dist, closest_point_xyz) от pt до ребер полигона (XY), используя loop_pts в качестве вершин."""
     if pt is None or not loop_pts or len(loop_pts) < 2:
         return None, None
 
@@ -644,7 +848,7 @@ def _min_dist_to_loop_xy(pt, loop_pts):
 
 
 def get_room_center_ex(room, return_method=False):
-    """Return XYZ in link coordinates."""
+    """Возвращает XYZ в координатах связи."""
     try:
         return get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=return_method)
     except Exception:
@@ -652,18 +856,18 @@ def get_room_center_ex(room, return_method=False):
 
 
 def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False):
-    """Return XYZ in link coordinates, trying to avoid points too close to room boundaries.
+    """Возвращает XYZ в координатах связи, стараясь избегать точек, слишком близких к границам помещения.
 
-    Strategy:
-      - Generate candidates: boundary centroid, location point, bbox center
-      - If boundary loop is available and min_wall_clearance_ft > 0, pick the candidate with the
-        largest distance to boundary edges (approx, XY) and nudge it if still under clearance.
-      - Otherwise fallback to get_room_center_ex behavior.
+    Стратегия:
+      - Генерация кандидатов: центроид границы, точка размещения, центр ограничивающего параллелепипеда
+      - Если цикл границы доступен и min_wall_clearance_ft > 0, выбрать кандидата с
+        наибольшим расстоянием до границ (приблизительно, XY) и сдвинуть его, если все еще находится за пределами зазора.
+      - В противном случае fallback к поведению get_room_center_ex.
     """
     if room is None:
         return (None, None) if return_method else None
 
-    # CRASH PROTECTION: Wrap geometry access
+    # ЗАЩИТА ОТ СБОЕВ: Обход доступа к геометрии
     try:
         min_clear = float(min_wall_clearance_ft or 0.0)
     except Exception:
@@ -677,7 +881,7 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
         loop_pts = None
         hole_loops = []
 
-    # Fast path: rectangular-ish rooms -> exact bounding box center
+    # Быстрый путь: прямоугольные помещения -> точный центр ограничивающего параллелепипеда
     if loop_pts and (not hole_loops):
         try:
             min_x = min(float(p.X) for p in loop_pts)
@@ -688,21 +892,21 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
             poly_area = abs(_poly_area_xy(loop_pts))
             if bbox_area > 1e-9 and poly_area > 1e-9:
                 fill = poly_area / bbox_area
-                # close to rectangle (and not highly concave)
+                # близко к прямоугольнику (и не сильно вогнутый)
                 if fill >= 0.96:
                     zref = float(loop_pts[0].Z)
                     p = DB.XYZ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5, zref)
-                    # Skip IsPointInRoom for fast path to avoid crashes
+                    # Пропустить IsPointInRoom для быстрого пути, чтобы избежать сбоев
                     return (p, 'rect') if return_method else p
         except Exception:
             pass
 
     candidates = []
 
-    # Polylabel candidate (best for complex geometry)
+    # Кандидат Polylabel (лучший для сложной геометрии)
     if loop_pts:
         try:
-            # precision in feet (tighter if user requests clearance)
+            # точность в футах (более высокая, если пользователь запрашивает зазор)
             prec = 0.2
             if min_clear > 0.0:
                 prec = max(0.1, min(0.5, min_clear / 3.0))
@@ -712,20 +916,21 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
                 zref = float(loop_pts[0].Z)
                 p = DB.XYZ(float(xy[0]), float(xy[1]), zref)
                 
-                # Check IsPointInRoom with safety
+                # Проверить IsPointInRoom с безопасностью
                 ok = True
                 try:
                     if hasattr(room, 'IsPointInRoom'):
                         ok = bool(room.IsPointInRoom(p))
                 except Exception:
-                    ok = True # trust geometric calc if Revit fails
+                    # доверять геометрическим вычислениям, если Revit выдает ошибку
+                    ok = True
                 
                 if ok:
                     candidates.append(('polylabel', p))
         except Exception:
             pass
 
-    # Boundary centroid candidate
+    # Кандидат центроида границы
     if loop_pts:
         try:
             cc = _poly_centroid_xy(loop_pts)
@@ -743,7 +948,7 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
         except Exception:
             pass
 
-    # Location point candidate
+    # Кандидат точки расположения
     try:
         loc = room.Location
         if loc and hasattr(loc, 'Point'):
@@ -759,7 +964,7 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
     except Exception:
         pass
 
-    # BBox candidate
+    # Кандидат BBox
     try:
         bb = room.get_BoundingBox(None)
         if bb:
@@ -771,16 +976,16 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
     if not candidates:
         return (None, None) if return_method else None
 
-    # Pick best candidate...
+    # Выбрать лучшего кандидата...
     # (Rest of logic remains same, but wrapped in general try-except of parent function if needed)
     
-    # ... logic continues ...
-    # Re-insert the rest of the function logic here or assume it follows.
-    # Since I'm editing a large block, I'll paste the rest of the original function body 
-    # to ensure it's not cut off, but with added safety.
+    # ... логика продолжается ...
+    # Повторно вставляем остальную часть логики функции сюда или предполагаем, что она следует.
+    # Поскольку я редактирую большой блок, я вставлю остальную часть исходного тела функции,
+    # чтобы убедиться, что она не будет обрезана, но с дополнительной безопасностью.
 
-    # Prefer a point that is both well-separated from walls and visually centered.
-    # Among candidates with near-max clearance, pick the one closest to the room bbox center.
+    # Предпочесть точку, которая хорошо отделена от стен и визуально центрирована.
+    # Среди кандидатов с почти максимальным зазором выбрать тот, который ближе всего к центру ограничивающего параллелепипеда помещения.
     if loop_pts:
         try:
             min_x = min(float(p.X) for p in loop_pts)
@@ -823,7 +1028,7 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
                         best_d = d
 
                 if best_pp is not None:
-                    # Nudge away from nearest boundary if under requested clearance
+                    # Сдвинуть от ближайшей границы, если меньше требуемого зазора
                     try:
                         if min_clear > 0.0 and best_d is not None and best_d < min_clear:
                             _, q = _min_dist_to_loop_xy(best_pp, loop_pts)
@@ -849,12 +1054,12 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
         except Exception:
             pass
 
-    # If polylabel is available, prefer it for non-rectangular geometry
+    # Если polylabel доступен, предпочитать его для непрямоугольной геометрии
     for mm, pp in candidates:
         if mm == 'polylabel':
             return (pp, mm) if return_method else pp
 
-    # If no boundary info or clearance not requested -> preserve original priority behavior
+    # Если нет информации о границе или зазор не запрашивается -> сохранить исходное приоритетное поведение
     if (min_clear <= 0.0) or (not loop_pts):
         for m in ('boundary', 'location', 'bbox'):
             for mm, pp in candidates:
@@ -863,7 +1068,7 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
         mm, pp = candidates[0]
         return (pp, mm) if return_method else pp
 
-    # Pick candidate with max clearance to boundary
+    # Выбрать кандидата с максимальным зазором до границы
     def _prio(m):
         if m == 'boundary':
             return 2
@@ -873,15 +1078,15 @@ def get_room_center_ex_safe(room, min_wall_clearance_ft=0.0, return_method=False
 
 
 def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False, rules=None):
-    """Return 1 or 2 center points (XYZ in link coordinates) based on room shape.
+    """Возвращает 1 или 2 центральные точки (XYZ в координатах связи) на основе формы помещения.
 
-    Uses existing robust center finder for complex polygons and adds an option to return two points
-    for elongated rooms.
+    Использует существующий надежный поиск центра для сложных полигонов и добавляет возможность возвращать две точки
+    для вытянутых помещений.
     """
     if room is None:
         return ([], {}) if return_meta else []
 
-    # 1) Always compute best single center first (stable fallback)
+    # 1) Всегда сначала вычисляем лучший одиночный центр (стабильный fallback)
     c1, method = get_room_center_ex_safe(room, min_wall_clearance_ft=min_wall_clearance_ft, return_method=True)
     if c1 is None:
         return ([], {'count': 0, 'method': method}) if return_meta else []
@@ -899,7 +1104,7 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
         meta = {'count': 1, 'method': method, 'reason': 'no_boundary'}
         return (centers, meta) if return_meta else centers
 
-    # 2) Compute simple shape metrics from outer boundary bbox
+    # 2) Вычислить метрики простой формы по ограничивающему параллелепипеду внешней границы
     try:
         xs = [float(p.X) for p in loop_pts]
         ys = [float(p.Y) for p in loop_pts]
@@ -913,7 +1118,7 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
         long_dim = 0.0
         short_dim = 0.0
 
-    # Defaults (feet) – rules can override
+    # Значения по умолчанию (футы) – правила могут переопределить
     try:
         elong_ratio = float((rules or {}).get('light_room_elongation_ratio', 2.2) or 2.2)
     except Exception:
@@ -935,14 +1140,14 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
         meta = {'count': 1, 'method': method, 'ratio': ratio, 'long_dim_ft': long_dim}
         return (centers, meta) if return_meta else centers
 
-    # 3) Two centers: take two points along the long axis around the main center.
-    # Use polylabel on two clipped halves as a robust way to stay inside concave rooms.
+    # 3) Два центра: взять две точки вдоль длинной оси вокруг основного центра.
+    # Использовать polylabel на двух обрезанных половинках как надежный способ оставаться внутри вогнутых комнат.
     try:
         zref = float(loop_pts[0].Z)
     except Exception:
         zref = float(getattr(c1, 'Z', 0.0) or 0.0)
 
-    # Decide split axis by bbox
+    # Определить ось разделения по ограничивающему параллелепипеду
     split_x = bool(dx >= dy)
     try:
         mid_val = float(c1.X) if split_x else float(c1.Y)
@@ -958,7 +1163,7 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
                 continue
             if (v <= mid_val) if keep_leq else (v >= mid_val):
                 out.append(p)
-        # ensure at least a triangle
+        # убедиться, что есть хотя бы треугольник
         return out if len(out) >= 3 else None
 
     left = _clip_loop(loop_pts, keep_leq=True)
@@ -984,7 +1189,7 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
         c2 = None
         c3 = None
 
-    # Validate points are inside room
+    # Проверить, находятся ли точки внутри помещения
     valid = []
     for p in (c2, c3):
         if p is None:
@@ -998,7 +1203,7 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
         if ok:
             valid.append(p)
 
-    # If both halves failed, fallback to offset points along axis from c1
+    # Если обе половины не удались, fallback к смещенным точкам вдоль оси от c1
     if len(valid) < 2:
         try:
             step = max(float(min_clear), float(mm_to_ft(1200) or 0.0))
@@ -1042,7 +1247,7 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
     scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
     best_d, _, best_m, best_p = scored[0]
 
-    # Nudge away from nearest boundary if too close
+    # Сдвинуть от ближайшей границы, если слишком близко
     try:
         if best_d >= 0.0 and best_d < min_clear:
             d0, q = _min_dist_to_loop_xy(best_p, loop_pts)

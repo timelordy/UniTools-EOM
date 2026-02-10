@@ -34,6 +34,20 @@ def test_parse_cancel_command():
     assert data["action"] == "cancel"
 
 
+def test_parse_cancel_command_with_job_id():
+    data = parse_command("run:cancel:job123")
+    assert data["action"] == "cancel"
+    assert data["job_id"] == "job123"
+    assert data.get("mode") is None
+
+
+def test_parse_cancel_command_with_job_id_and_mode():
+    data = parse_command("run:cancel:job123:manual")
+    assert data["action"] == "cancel"
+    assert data["job_id"] == "job123"
+    assert data.get("mode") == "manual"
+
+
 def test_parse_plain_tool():
     data = parse_command("lights_center")
     assert data["action"] == "run"

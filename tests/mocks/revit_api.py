@@ -261,3 +261,102 @@ def mock_room(
             MockXYZ(center[0] + half, center[1] + half, center[2] + 3.0)
         )
     return MockRoom(name=name, number=number, location=location, bbox=bbox)
+
+
+class MockCurve:
+    """Mock for Autodesk.Revit.DB.Curve."""
+
+    def __init__(self, length: float = 10.0):
+        self.Length = length
+
+
+class MockLocationCurve:
+    """Mock for Autodesk.Revit.DB.LocationCurve."""
+
+    def __init__(self, curve: Optional[MockCurve] = None):
+        self.Curve = curve or MockCurve()
+
+
+class MockWallType(MockElement):
+    """Mock for Autodesk.Revit.DB.WallType."""
+    
+    def __init__(self, name: str = "Generic Wall", width: float = 0.5):
+        super().__init__(name=name)
+        self.Width = width
+        self.Kind = "Basic"
+
+
+class MockWall(MockElement):
+    """Mock for Autodesk.Revit.DB.Wall."""
+
+    def __init__(
+        self, 
+        name: str = "", 
+        curve: Optional[MockCurve] = None,
+        wall_type: Optional[MockWallType] = None,
+        bbox: Optional[MockBoundingBox] = None
+    ):
+        super().__init__(name=name, bbox=bbox)
+        self.Location = MockLocationCurve(curve)
+        self.WallType = wall_type or MockWallType()
+        self.Orientation = MockXYZ(0, 1, 0)  # Default orientation
+
+
+class MockFamilySymbol(MockElement):
+    """Mock for Autodesk.Revit.DB.FamilySymbol."""
+
+    def __init__(self, name: str = "", family_name: str = ""):
+        super().__init__(name=name)
+        self.FamilyName = family_name
+        self.IsActive = True
+
+    def Activate(self):
+        pass
+
+
+class MockFamilyInstance(MockElement):
+    """Mock for Autodesk.Revit.DB.FamilyInstance."""
+
+    def __init__(
+        self, 
+        name: str = "", 
+        symbol: Optional[MockFamilySymbol] = None,
+        location: Optional[MockXYZ] = None,
+        facing_orientation: Optional[MockXYZ] = None,
+        hand_orientation: Optional[MockXYZ] = None,
+        bbox: Optional[MockBoundingBox] = None
+    ):
+        super().__init__(name=name, bbox=bbox)
+        self.Symbol = symbol or MockFamilySymbol()
+        self._location = location
+        self.FacingOrientation = facing_orientation or MockXYZ(0, 1, 0)
+        self.HandOrientation = hand_orientation or MockXYZ(1, 0, 0)
+
+    @property
+    def Location(self) -> Optional[Any]:
+        if self._location:
+            return type("LocationPoint", (), {"Point": self._location})()
+        return None
+
+
+class DB:
+    """Mock namespace for Autodesk.Revit.DB."""
+
+    XYZ = MockXYZ
+    ElementId = MockElementId
+    BoundingBoxXYZ = MockBoundingBox
+    Element = MockElement
+    BuiltInCategory = MockBuiltInCategory
+    BuiltInParameter = MockBuiltInParameter
+    Wall = MockWall
+    WallType = MockWallType
+    Curve = MockCurve
+    FamilySymbol = MockFamilySymbol
+    FamilyInstance = MockFamilyInstance
+
+    # Add other needed enums/constants
+    class StorageType:
+        String = 0
+        Integer = 1
+        Double = 2
+

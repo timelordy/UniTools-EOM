@@ -1,12 +1,12 @@
 ﻿# -*- coding: utf-8 -*-
 
-"""Time-saved reporting for EOM tools.
+"""Отчет о сэкономленном времени для инструментов EOM.
 
-Estimates time saved based on manual placement rate and actual element count.
+Оценивает сэкономленное время на основе скорости ручной расстановки и фактического количества элементов.
 
-`MANUAL_TIME_PER_ITEM` values can be:
-- float: fixed minutes per unit
-- (min, max): range of minutes per unit
+Значения `MANUAL_TIME_PER_ITEM` могут быть:
+- float: фиксированное количество минут на единицу
+- (min, max): диапазон минут на единицу
 """
 
 import os
@@ -21,8 +21,8 @@ except NameError:
     text_type = str
 
 
-# Manual placement time estimates (minutes per element/room).
-# NOTE: keep Python 2.7 compatibility (pyRevit/IronPython).
+# Оценки времени ручной расстановки (минут на элемент/помещение).
+# ПРИМЕЧАНИЕ: сохраняйте совместимость с Python 2.7 (pyRevit/IronPython).
 MANUAL_TIME_PER_ITEM = {
     # 01. Розетки (бытовые): 5–7 минут на комнату
     'sockets_general': (5.0, 7.0),
@@ -39,7 +39,7 @@ MANUAL_TIME_PER_ITEM = {
     # Щит над дверью: per apartment
     'panel_door': (7.0, 7.0),
 
-    # Other tools (kept for compatibility)
+    # Другие инструменты (сохранены для совместимости)
     'lights_entrance': (1.0, 3.0),
     'entrance_numbering': (10.0, 10.0),
     'storage_equipment': (15.0, 15.0),
@@ -48,7 +48,7 @@ MANUAL_TIME_PER_ITEM = {
 }
 
 
-# Backward-compatible key aliases used by some scripts
+# Псевдонимы ключей инструментов для обратной совместимости, используемые некоторыми скриптами
 TOOL_KEY_ALIASES = {
     'switches': 'switches_doors',
     'sockets_wet': 'wet_zones',
@@ -76,7 +76,7 @@ ROOM_COUNT_TOOL_SUFFIXES = {
     'shdup': [':SHDUP'],
 }
 
-# Session storage for element counts
+# Хранилище сеанса для подсчета элементов
 _session_counts = {}
 _lift_shaft_count_cache = None
 _room_count_cache = {}
@@ -149,7 +149,7 @@ def _get_room_count_override(tool_key):
 
 
 def set_room_count_override(tool_key, count):
-    """Set explicit room count override for current session (non-persistent)."""
+    """Устанавливает явное переопределение количества помещений для текущего сеанса (непостоянное)."""
     try:
         key = normalize_tool_key(tool_key)
     except Exception:
@@ -569,7 +569,7 @@ def _get_room_count(tool_key):
 
 
 def _estimate_lift_shaft_count():
-    """Estimate number of lift shafts (prefer shaft elements, fallback to lights)."""
+    """Оценивает количество лифтовых шахт (предпочитает элементы шахт, в противном случае — светильники)."""
     count = _estimate_lift_shaft_count_from_model()
     if count:
         return count
@@ -718,7 +718,7 @@ def _estimate_lift_shaft_count_from_model():
 
 
 def _estimate_lift_shaft_count_from_lights():
-    """Estimate number of lift shafts by clustering placed lift-shaft lights."""
+    """Оценивает количество лифтовых шахт путем кластеризации размещенных светильников лифтовых шахт."""
     try:
         from pyrevit import revit
         from Autodesk.Revit import DB
@@ -870,7 +870,7 @@ def _append_time_saved_log_entry(tool_key, count, minutes, minutes_min, minutes_
 
 
 def get_last_time_saved_entry(tool_key):
-    """Return last log entry for tool or None."""
+    """Возвращает последнюю запись журнала для инструмента или None."""
     key = normalize_tool_key(tool_key)
     for path in _get_log_paths():
         try:
@@ -954,7 +954,7 @@ def _save_counts_store(data):
 
 
 def set_element_count(tool_key, count):
-    """Store the number of elements created for time calculation."""
+    """Сохраняет количество созданных элементов для расчета времени."""
     count = _normalize_count(tool_key, count)
     key = normalize_tool_key(tool_key)
     try:
@@ -970,7 +970,7 @@ def set_element_count(tool_key, count):
 
 
 def get_element_count(tool_key):
-    """Get stored element count."""
+    """Получает сохраненное количество элементов."""
     key = normalize_tool_key(tool_key)
     try:
         if key in _session_counts:
@@ -988,7 +988,7 @@ def get_element_count(tool_key):
 
 
 def normalize_tool_key(tool_key):
-    """Return canonical tool key (handles legacy aliases)."""
+    """Возвращает канонический ключ инструмента (обрабатывает устаревшие псевдонимы)."""
     try:
         return TOOL_KEY_ALIASES.get(tool_key, tool_key)
     except Exception:
@@ -996,7 +996,7 @@ def normalize_tool_key(tool_key):
 
 
 def get_manual_time_per_item_range(tool_key):
-    """Return (min, max) minutes per unit."""
+    """Возвращает (мин, макс) минут на единицу."""
     key = normalize_tool_key(tool_key)
     v = MANUAL_TIME_PER_ITEM.get(key, None)
     if v is None:
@@ -1014,7 +1014,7 @@ def get_manual_time_per_item_range(tool_key):
 
 
 def calculate_time_saved_range(tool_key, count=None):
-    """Calculate (min, max) time saved in minutes based on element count."""
+    """Рассчитывает (мин, макс) сэкономленного времени в минутах на основе количества элементов."""
     if count is None:
         count = get_element_count(tool_key)
     count = _normalize_count(tool_key, count)
@@ -1030,7 +1030,7 @@ def calculate_time_saved_range(tool_key, count=None):
 
 
 def calculate_time_saved(tool_key, count=None):
-    """Calculate time saved in minutes based on element count."""
+    """Рассчитывает сэкономленное время в минутах на основе количества элементов."""
     mn, mx = calculate_time_saved_range(tool_key, count)
     if mn <= 0 and mx <= 0:
         return 0.0
@@ -1066,18 +1066,18 @@ def _format_minutes(minutes):
 
 
 def format_time_saved(tool_key, count=None):
-    """Format time saved as human-readable string."""
+    """Форматирует сэкономленное время в удобочитаемую строку."""
     minutes = calculate_time_saved(tool_key, count)
     return _format_minutes(minutes)
 
 
 def report(output, tool_key, count=None):
-    """Report time saved to output.
-    
-    Args:
-        output: pyRevit output object with print_md method
-        tool_key: Tool identifier (e.g., 'sockets_general')
-        count: Number of elements created. If None, uses stored count.
+    """Сообщает о сэкономленном времени в вывод.
+
+    Аргументы:
+        output: объект вывода pyRevit с методом print_md
+        tool_key: Идентификатор инструмента (например, 'sockets_general')
+        count: Количество созданных элементов. Если None, используется сохраненное количество.
     """
     raw_count = None
     if count is not None:
@@ -1141,5 +1141,5 @@ def report(output, tool_key, count=None):
     return True
 
 
-# Backwards-compatible alias
+# Псевдоним для обратной совместимости
 report_time_saved = report

@@ -1,9 +1,9 @@
 ﻿# -*- coding: utf-8 -*-
-"""Helpers for resolving a PostCommand id for Hub runs (pure Python)."""
+"""Хелперы для разрешения PostCommand id для Hub запусков (чистый Python)."""
 
 
 def normalize_command_id(value):
-    """Return a cleaned command id string or None."""
+    """Вернуть очищенную строку command id или None."""
     try:
         if value is None:
             return None
@@ -41,7 +41,7 @@ def normalize_command_id(value):
 
 
 def select_command_id(env_value, file_value):
-    """Prefer env_value over file_value, return normalized id or None."""
+    """Предпочитать env_value перед file_value, вернуть нормализованный id или None."""
     env_norm = normalize_command_id(env_value)
     if env_norm:
         return env_norm

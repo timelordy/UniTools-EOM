@@ -1,8 +1,8 @@
 ﻿# -*- coding: utf-8 -*-
-"""Configuration loader for EOM Template Tools.
+"""Загрузчик конфигурации для EOM Template Tools.
 
-Loads rules from JSON configuration files with sensible defaults.
-Compatible with IronPython 2.7 (pyRevit).
+Загружает правила из JSON конфигурационных файлов с разумными дефолтами.
+Совместим с IronPython 2.7 (pyRevit).
 """
 import io
 import json
@@ -10,23 +10,23 @@ import os
 
 
 def _extension_root_from_lib():
-    """Get extension root directory from lib location."""
+    """Получить корневую директорию расширения из расположения lib."""
     return os.path.dirname(os.path.dirname(__file__))
 
 
 def get_default_rules_path():
-    """Get the path to the default rules configuration file."""
+    """Получить путь к файлу конфигурации по умолчанию."""
     return os.path.join(_extension_root_from_lib(), 'config', 'rules.default.json')
 
 
 def load_rules(path=None):
-    """Load rules from JSON configuration file.
-    
+    """Загрузить правила из JSON конфигурационного файла.
+
     Args:
-        path: Path to JSON config file. If None, uses default rules file.
-    
+        path: Путь к JSON конфиг-файлу. Если None, используется дефолтный файл правил.
+
     Returns:
-        Dictionary with all configuration keys, defaults applied.
+        Словарь со всеми ключами конфигурации, с применёнными дефолтами.
     """
     rules_path = path or get_default_rules_path()
     try:
@@ -44,7 +44,7 @@ def load_rules(path=None):
         except Exception:
             raise
 
-    # Defaults
+    # Дефолтные значения
     defaults = {
         'comment_tag': 'AUTO_EOM',
         'family_type_names': {},
@@ -56,6 +56,14 @@ def load_rules(path=None):
         'light_two_centers_min_long_mm': 4500,
         'exclude_room_name_keywords': [u'ниша', u'балкон', u'лодж', u'loggia', u'balcony', u'niche'],
         'panel_above_door_offset_mm': 300,
+        'floor_panel_type_rules': [],
+        'floor_panel_niche_patterns': [u'ниша', u'niche', u'эом', u'шахт'],
+        'floor_panel_niche_patterns_single': [],
+        'floor_panel_height_mm': 1700,
+        'floor_panel_opening_type_names': [],
+        'floor_panel_opening_room_patterns': [u'эом'],
+        'floor_panel_min_wall_clearance_mm': 0,
+        'floor_panel_dedupe_radius_mm': 300,
         'dedupe_radius_mm': 500,
         'max_place_count': 200,
         'batch_size': 25,
@@ -65,6 +73,15 @@ def load_rules(path=None):
         'apartment_require_param': True,
         'apartment_allow_department_fallback': False,
         'apartment_allow_room_number_fallback': False,
+        'apartment_infer_from_rooms': True,
+        'apartment_department_patterns': [u'кварт', u'apartment', u'flat'],
+        'apartment_room_name_patterns': [u'кварт', u'кух', u'спаль', u'гост', u'прих', u'living', u'bed'],
+        'apartment_exclude_department_patterns': [u'моп', u'tech', u'тех', u'офис', u'office'],
+
+        # Специфичные переопределения для этажных щитов (ЩЭ).
+        # Дефолтное поведение: определять количество квартир из помещений (даже если параметр квартиры отсутствует).
+        'floor_panel_apartment_require_param': False,
+        'floor_panel_apartment_infer_from_rooms': True,
         'enable_existing_dedupe': False,
         'socket_spacing_mm': 3000,
         'socket_height_mm': 300,

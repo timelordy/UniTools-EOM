@@ -72,7 +72,12 @@ def main():
     sym_2g = get_switch_symbol(doc, two_gang=True)
 
     if not sym_1g:
-        forms.alert(u"Не найден тип 1-кл выключателя (ID {})".format(SWITCH_1G_TYPE_ID), exitscript=True)
+        forms.alert(
+            u"Не найден тип 1-кл выключателя.\n"
+            u"Загрузите подходящее семейство или укажите тип в config/rules.default.json "
+            u"(family_type_names.switch_1g).",
+            exitscript=True
+        )
         return
     if not sym_2g:
         sym_2g = sym_1g

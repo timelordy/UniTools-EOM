@@ -22,6 +22,39 @@ except ImportError:
     import socket_utils as su
 
 
+# Inline helpers (заменяют отсутствующие модули input_utils и room_name_utils)
+
+def _ask_for_mm_value(prompt, title, default_mm):
+    """Запросить у пользователя значение в миллиметрах."""
+    try:
+        from pyrevit import forms
+        result = forms.ask_for_string(
+            prompt=u'{0} (по умолчанию: {1} мм)'.format(prompt, default_mm),
+            title=title,
+            default=str(default_mm)
+        )
+        if result is None:
+            return None
+        try:
+            return int(result)
+        except (ValueError, TypeError):
+            return default_mm
+    except Exception:
+        return default_mm
+
+
+def _is_tbo_room_name(room_name):
+    """Проверить, является ли помещение ТБО (мусорокамера)."""
+    if not room_name:
+        return False
+    name_lower = room_name.lower().strip()
+    tbo_keywords = [u'тбо', u'тб', u'мусор', u'мусорокамера', u'мусорная']
+    for kw in tbo_keywords:
+        if kw in name_lower:
+            return True
+    return False
+
+
 doc = revit.doc
 uidoc = revit.uidoc
 output = script.get_output()
@@ -1932,6 +1965,37 @@ def _get_from_to_rooms(door, link_doc):
     return fr, tr
 
 
+def _room_is_tbo(room):
+    if room is None:
+        return False
+    try:
+        name = _get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_NAME, name='Name')
+    except Exception:
+        name = u''
+    if not name:
+        try:
+            name = getattr(room, 'Name', u'') or u''
+        except Exception:
+            name = u''
+    return bool(_is_tbo_room_name(name))
+
+
+def _door_has_tbo_room(door, link_doc):
+    if door is None or link_doc is None:
+        return False
+    try:
+        phases = [list(link_doc.Phases)[-1]]
+    except Exception:
+        phases = []
+    try:
+        for r in _iter_from_to_rooms(door, phases):
+            if _room_is_tbo(r):
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def _choose_inside_dir_by_rooms_or_probe(door, link_doc, center_pt, normal_xy):
     """Return unit XY normal pointing INSIDE (apartment side) using rooms/probe. Returns None if unknown."""
     n = _xy_unit(normal_xy)
@@ -3015,6 +3079,14 @@ def main():
         APT_ALLOW_NUMBER = False
     comment_tag = rules.get('comment_tag', 'AUTO_EOM')
     offset_mm = rules.get('panel_above_door_offset_mm', 300)
+    user_offset_mm = _ask_for_mm_value(
+        prompt=u'Высота размещения над дверью (мм)',
+        title=u'Щит над дверью',
+        default_mm=offset_mm,
+    )
+    if user_offset_mm is None:
+        return
+    offset_mm = user_offset_mm
     recess_mm = rules.get('panel_recess_mm', 40)
     dedupe_mm = rules.get('dedupe_radius_mm', 500)
     batch_size = int(rules.get('batch_size', 25) or 25)
@@ -3225,6 +3297,9 @@ def main():
                         except:
                             debug_log.append(u"Skip '{0}': rooms check failed -> REJECTED (no apartment)".format(tname))
                     # Skip doors without confirmed apartment rooms
+                    continue
+                if _door_has_tbo_room(d, link_doc):
+                    # Skip doors adjacent to TBO rooms
                     continue
                 
                 target_doors.append(d)

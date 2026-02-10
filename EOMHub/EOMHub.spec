@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec file for EOM Hub."""
+"""PyInstaller spec file for UniTools Hub."""
 
 import os
 from pathlib import Path

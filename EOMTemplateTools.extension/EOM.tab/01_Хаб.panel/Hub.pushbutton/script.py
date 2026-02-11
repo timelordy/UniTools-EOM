@@ -609,18 +609,26 @@ def _normalize_fs_path(path):
 
 
 def _is_hub_session_alive(hub_session_path, expected_exe=None):
-    """Return True when session file exists and hub port is reachable."""
+    """Return True only for reachable sessions bound to canonical headless EOMHub.exe."""
     if not hub_session_path or not os.path.exists(hub_session_path):
         return False
+
+    expected_norm = _normalize_fs_path(expected_exe) if expected_exe else None
 
     try:
         with io.open(hub_session_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
 
-        if expected_exe:
-            expected_norm = _normalize_fs_path(expected_exe)
+        # Validate session-file exe binding early.
+        if expected_norm:
             actual_norm = _normalize_fs_path(payload.get("exePath"))
-            if expected_norm and actual_norm and actual_norm != expected_norm:
+            if actual_norm and actual_norm != expected_norm:
+                _log_debug(
+                    u"Session exe mismatch: expected={0} actual={1}".format(
+                        _to_unicode(expected_norm),
+                        _to_unicode(actual_norm),
+                    )
+                )
                 return False
 
         port = payload.get("hubPort")
@@ -636,12 +644,92 @@ def _is_hub_session_alive(hub_session_path, expected_exe=None):
         probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         probe.settimeout(0.25)
         try:
-            return probe.connect_ex(("127.0.0.1", port)) == 0
+            is_reachable = probe.connect_ex(("127.0.0.1", port)) == 0
         finally:
             try:
                 probe.close()
             except Exception:
                 pass
+
+        if not is_reachable:
+            return False
+
+        # Require process identity + command line check to avoid reusing non-headless UI process.
+        pid_raw = payload.get("pid")
+        try:
+            session_pid = int(pid_raw)
+        except Exception:
+            _log_debug(u"Session file has no valid pid; forcing headless relaunch")
+            return False
+
+        import subprocess as _sub
+
+        ps_cmd = (
+            "Get-CimInstance Win32_Process -Filter \"Name='EOMHub.exe'\" -ErrorAction SilentlyContinue | "
+            "Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress"
+        )
+        try:
+            out = _sub.check_output(
+                ["powershell.exe", "-NoProfile", "-Command", ps_cmd],
+                stderr=_sub.STDOUT,
+            )
+        except Exception as proc_err:
+            _log_debug(u"Failed to inspect EOMHub.exe process list: {0}".format(_to_unicode(proc_err)))
+            return False
+
+        if not out:
+            return False
+
+        try:
+            proc_payload = json.loads(out.decode("utf-8", "ignore"))
+        except Exception:
+            try:
+                proc_payload = json.loads(_to_unicode(out))
+            except Exception:
+                return False
+
+        rows = proc_payload if isinstance(proc_payload, list) else ([proc_payload] if proc_payload else [])
+        proc_row = None
+        for row in rows:
+            try:
+                if int(row.get("ProcessId") or row.get("Id") or -1) == session_pid:
+                    proc_row = row
+                    break
+            except Exception:
+                continue
+
+        if not proc_row:
+            _log_debug(u"Session pid not found among running EOMHub.exe processes: {0}".format(_to_unicode(session_pid)))
+            return False
+
+        proc_exe_norm = _normalize_fs_path(proc_row.get("ExecutablePath") or proc_row.get("Path"))
+        if expected_norm and proc_exe_norm and proc_exe_norm != expected_norm:
+            _log_debug(
+                u"Session pid exe mismatch: pid={0} expected={1} actual={2}".format(
+                    _to_unicode(session_pid),
+                    _to_unicode(expected_norm),
+                    _to_unicode(proc_exe_norm),
+                )
+            )
+            return False
+
+        proc_cmdline = _to_unicode(proc_row.get("CommandLine") or "")
+        if u"--headless" not in proc_cmdline.lower():
+            _log_debug(u"Session pid is non-headless; terminating pid={0}".format(_to_unicode(session_pid)))
+            try:
+                _sub.call(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-Command",
+                        "Stop-Process -Force -Id {0} -ErrorAction SilentlyContinue".format(session_pid),
+                    ]
+                )
+            except Exception:
+                pass
+            return False
+
+        return True
     except Exception:
         return False
 
@@ -2280,6 +2368,7 @@ def main():
     # If Hub already running for this session, do not launch duplicate process.
     hub_session_path = _get_hub_session_path(session_id)
     if _is_hub_session_alive(hub_session_path, expected_exe=hub_exe):
+        _log_debug(u"Reusing existing headless Hub session: {0}".format(_to_unicode(hub_session_path)))
         if pane_shown:
             try:
                 _schedule_hub_window_hide()
@@ -2294,8 +2383,10 @@ def main():
             pass
 
     if hub_exe:
+        _log_debug(u"Launching headless Hub: exe={0} session={1}".format(_to_unicode(hub_exe), _to_unicode(session_id)))
         launched = _launch_hub_headless(hub_exe, session_id)
         if not launched:
+            _log_debug(u"Headless launch failed for exe={0} session={1}".format(_to_unicode(hub_exe), _to_unicode(session_id)))
             try:
                 from pyrevit import forms
                 forms.alert(
@@ -2307,8 +2398,9 @@ def main():
             except Exception:
                 pass
         elif pane_shown:
+            _log_debug(u"Headless Hub launched successfully; scheduling standalone-window hide")
             try:
-                _schedule_hub_window_hide()
+                _schedule_hub_window_hide(duration_sec=8.0, poll_interval_sec=0.2)
             except Exception:
                 pass
     else:

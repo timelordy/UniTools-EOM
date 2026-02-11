@@ -15,7 +15,8 @@ $repoRoot = Split-Path -Parent $repoRoot
 Set-Location $repoRoot
 
 $eomHubDir = Join-Path $repoRoot 'EOMHub'
-$eomHubExe = Join-Path $eomHubDir 'dist\EOMHub.exe'
+# Single source of truth for Hub binary in this repo.
+$canonicalHubExe = Join-Path $repoRoot 'EOMTemplateTools.extension\bin\EOMHub.exe'
 
 if ($RebuildEOMHub) {
     Write-Host 'Building EOMHub.exe...' -ForegroundColor Yellow
@@ -24,8 +25,8 @@ if ($RebuildEOMHub) {
     & (Join-Path $eomHubDir 'build.ps1') @buildArgs
 }
 
-if (-not (Test-Path $eomHubExe)) {
-    throw "EOMHub.exe not found: $eomHubExe. Build it first or pass -RebuildEOMHub."
+if (-not (Test-Path $canonicalHubExe)) {
+    throw "Canonical EOMHub.exe not found: $canonicalHubExe. Build it first or pass -RebuildEOMHub."
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -45,7 +46,7 @@ if (-not (Test-Path $payloadSrc)) {
 }
 
 Copy-Item -Path (Join-Path $payloadSrc '*') -Destination $stagingDir -Recurse -Force
-Copy-Item -Path $eomHubExe -Destination (Join-Path $stagingDir 'EOMHub.exe') -Force
+Copy-Item -Path $canonicalHubExe -Destination (Join-Path $stagingDir 'EOMHub.exe') -Force
 
 Set-Content -Path (Join-Path $stagingDir 'port.txt') -Value $Port -Encoding ASCII
 Set-Content -Path (Join-Path $stagingDir 'server_ip.txt') -Value $ServerIp -Encoding ASCII

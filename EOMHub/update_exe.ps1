@@ -4,17 +4,14 @@ Get-Process -Name "EOMHub" -ErrorAction SilentlyContinue | Stop-Process -Force -
 Start-Sleep -Seconds 1
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$source = Join-Path $PSScriptRoot "dist\EOMHub.exe"
 $canonical = Join-Path $repoRoot "EOMTemplateTools.extension\bin\EOMHub.exe"
 $mirror = Join-Path $env:APPDATA "pyRevit\Extensions\EOMTemplateTools.extension\bin\EOMHub.exe"
 
-if (-not (Test-Path $source)) {
-    throw "Source EXE not found: $source"
+if (-not (Test-Path $canonical)) {
+    throw "Canonical EXE not found: $canonical"
 }
 
-Write-Host "Updating canonical EXE: $canonical"
-New-Item -ItemType Directory -Path (Split-Path -Parent $canonical) -Force | Out-Null
-Copy-Item -Path $source -Destination $canonical -Force
+Write-Host "Canonical EXE source: $canonical"
 
 Write-Host "Updating mirror EXE: $mirror"
 New-Item -ItemType Directory -Path (Split-Path -Parent $mirror) -Force | Out-Null

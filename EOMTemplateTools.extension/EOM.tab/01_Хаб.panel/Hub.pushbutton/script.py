@@ -707,7 +707,7 @@ def _kill_duplicate_hub_processes(expected_exe):
 
 
 def find_hub_exe():
-    """Find EOMHub.exe in possible locations."""
+    """Find canonical EOMHub.exe path (single source of truth)."""
     script_dir = _to_unicode(os.path.dirname(__file__))
     # script_dir = .../EOMTemplateTools.extension/EOM.tab/01_Хаб.panel/Hub.pushbutton
     extension_dir = _to_unicode(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))))
@@ -719,17 +719,6 @@ def find_hub_exe():
     canonical = os.path.join(extension_dir, "bin", "EOMHub.exe")
     if os.path.exists(canonical):
         return canonical
-
-    appdata_fallback = os.path.join(
-        os.environ.get("APPDATA", ""),
-        "pyRevit",
-        "Extensions",
-        "EOMTemplateTools.extension",
-        "bin",
-        "EOMHub.exe",
-    )
-    if os.path.exists(appdata_fallback):
-        return appdata_fallback
 
     return None
 
@@ -762,6 +751,33 @@ def _hide_hub_window():
     except Exception:
         pass
     return False
+
+
+def _schedule_hub_window_hide(duration_sec=4.0, poll_interval_sec=0.2):
+    """Hide standalone Hub window for a short period to catch late window creation."""
+
+    def _worker():
+        try:
+            end_ts = time.time() + max(float(duration_sec), 0.2)
+        except Exception:
+            end_ts = time.time() + 4.0
+
+        while time.time() <= end_ts:
+            try:
+                _hide_hub_window()
+            except Exception:
+                pass
+            try:
+                time.sleep(max(float(poll_interval_sec), 0.05))
+            except Exception:
+                break
+
+    try:
+        t = threading.Thread(target=_worker)
+        t.daemon = True
+        t.start()
+    except Exception:
+        _hide_hub_window()
 
 
 def is_hub_running():
@@ -1817,11 +1833,7 @@ def start_command_monitor(start_thread=True):
                 _clear_active_job(job_id)
 
                 try:
-                    user32 = ctypes.windll.user32
-                    hwnd = _find_hub_window()
-                    if hwnd and hwnd != 0:
-                        user32.ShowWindow(hwnd, 9)
-                        user32.SetForegroundWindow(hwnd)
+                    _schedule_hub_window_hide(duration_sec=1.0, poll_interval_sec=0.2)
                 except Exception:
                     pass
                       
@@ -2270,7 +2282,7 @@ def main():
     if _is_hub_session_alive(hub_session_path, expected_exe=hub_exe):
         if pane_shown:
             try:
-                _hide_hub_window()
+                _schedule_hub_window_hide()
             except Exception:
                 pass
         return
@@ -2296,8 +2308,7 @@ def main():
                 pass
         elif pane_shown:
             try:
-                time.sleep(0.2)
-                _hide_hub_window()
+                _schedule_hub_window_hide()
             except Exception:
                 pass
     else:

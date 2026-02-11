@@ -63,7 +63,8 @@ ROOM_COUNT_TOOLS = set([
     'sockets_general',
     'kitchen_block',
     'wet_zones',
-    'low_voltage',
+    # low_voltage intentionally excluded: для этого инструмента
+    # нужно считать фактически созданные элементы, а не комнаты.
     'ac_sockets',
     'shdup',
 ])

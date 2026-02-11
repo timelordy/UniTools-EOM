@@ -2,6 +2,15 @@ import React, { useEffect, useMemo, useRef } from 'react'
 
 type JobStatus = 'idle' | 'pending' | 'running' | 'completed' | 'error' | 'cancelled'
 
+interface UxErrorInfo {
+  code: string
+  title: string
+  message: string
+  nextAction?: string
+  technicalMessage?: string
+  canRetry: boolean
+}
+
 interface ExecutionOverlayProps {
   visible: boolean
   status: JobStatus
@@ -18,6 +27,7 @@ interface ExecutionOverlayProps {
     errors?: number
   } | null
   summary?: Record<string, unknown> | null
+  uxError?: UxErrorInfo | null
   canCancel: boolean
   onCancel?: () => void
 }
@@ -72,6 +82,7 @@ const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
   queueLabel,
   stats,
   summary,
+  uxError,
   canCancel,
   onCancel,
 }) => {
@@ -87,6 +98,7 @@ const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
   const percent = total > 0 ? Math.min(100, Math.round((processed / Math.max(total, 1)) * 100)) : null
   const isRunning = status === 'pending' || status === 'running'
   const isCompleted = status === 'completed'
+  const isError = status === 'error' && !!uxError
 
   useEffect(() => {
     if (!visible || !isRunning || !canCancel || !onCancel) return
@@ -148,6 +160,16 @@ const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
           <div className="apply-progress-complete">
             <div className="apply-progress-complete-title">Готово</div>
             <div className="apply-progress-complete-text">{completionMessage}</div>
+          </div>
+        ) : null}
+
+        {isError ? (
+          <div className="apply-progress-complete" role="alert" aria-live="assertive">
+            <div className="apply-progress-complete-title">{uxError?.title}</div>
+            <div className="apply-progress-complete-text">{uxError?.message}</div>
+            {uxError?.nextAction ? (
+              <div className="cancel-hint" style={{ textAlign: 'left', marginTop: 6 }}>{uxError.nextAction}</div>
+            ) : null}
           </div>
         ) : null}
 

@@ -161,7 +161,7 @@ def main():
                 symbol = sym_2g if is_two_gang else sym_1g
                 
                 point, rotation = calc_switch_position_from_separation_line(
-                    sep_line_info, room, link_transform, link_doc
+                    sep_line_info, room, link_transform, link_doc, place_inside_room=(not is_wet)
                 )
                 
                 if created < 3 or "кухн" in room_name.lower():
@@ -244,7 +244,7 @@ def main():
             symbol = sym_2g if is_two_gang else sym_1g
 
             point, rotation = calc_switch_position(
-                best_info, place_inside, room, link_transform
+                best_info, place_inside, room, link_transform, link_doc
             )
 
             if created < 3 or "спальн" in room_name.lower():
@@ -303,6 +303,21 @@ def main():
                             ft_to_mm(best_info["_debug_offset_from_center"]),
                             ft_to_mm(best_info["_debug_t_switch_raw"]),
                             ft_to_mm(best_info["_debug_t_switch_clamped"])))
+                        output.print_md(u"  DEBUG: adjacent_wall={}, remaining={:.0f}mm, hops={}, final_wall_id={}, raw_outside_host={}".format(
+                            best_info.get("_debug_used_adjacent_wall", False),
+                            ft_to_mm(best_info.get("_debug_remaining_after_host", 0.0)),
+                            best_info.get("_debug_chain_hops", 0),
+                            best_info.get("_debug_final_wall_id", "N/A"),
+                            best_info.get("_debug_raw_outside_host", False)))
+                        output.print_md(u"  DEBUG: surface_source={}, surface_sign={}, has_target_room={}".format(
+                            best_info.get("_debug_surface_source", "N/A"),
+                            best_info.get("_debug_surface_sign", "N/A"),
+                            best_info.get("_debug_has_target_room", False)))
+                        output.print_md(u"  DEBUG: ref_probe(+/−)=({}/{}), target_probe(+/−)=({}/{})".format(
+                            best_info.get("_debug_ref_probe_plus", "N/A"),
+                            best_info.get("_debug_ref_probe_minus", "N/A"),
+                            best_info.get("_debug_target_probe_plus", "N/A"),
+                            best_info.get("_debug_target_probe_minus", "N/A")))
                 else:
                     output.print_md(u"  switch: NONE (no wall?)")
 

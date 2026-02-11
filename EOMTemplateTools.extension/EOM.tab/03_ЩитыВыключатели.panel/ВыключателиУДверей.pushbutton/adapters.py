@@ -331,6 +331,264 @@ def find_adjacent_wall(current_wall, link_doc, link_transform, direction):
     return None, None, None, None
 
 
+def _xy_distance(p1, p2):
+    try:
+        return math.sqrt((p1.X - p2.X) ** 2 + (p1.Y - p2.Y) ** 2)
+    except Exception:
+        return float('inf')
+
+
+def _get_wall_host_geometry(wall, link_transform):
+    """Возвращает геометрию стены в координатах host-документа."""
+    try:
+        p0, p1, width = get_wall_curve_and_width(wall)
+        if not p0 or not p1:
+            return None, None, None, None, None
+
+        p0_t = link_transform.OfPoint(p0)
+        p1_t = link_transform.OfPoint(p1)
+
+        dx = p1_t.X - p0_t.X
+        dy = p1_t.Y - p0_t.Y
+        length = math.sqrt(dx * dx + dy * dy)
+        if length < 1e-9:
+            return None, None, None, None, None
+
+        direction = DB.XYZ(dx / length, dy / length, 0)
+        return p0_t, p1_t, width, length, direction
+    except Exception:
+        return None, None, None, None, None
+
+
+def _project_point_to_segment(point, seg_p0, seg_p1):
+    """Проекция точки на отрезок в XY. Возвращает (proj_point, t_clamped, dist)."""
+    try:
+        dx = seg_p1.X - seg_p0.X
+        dy = seg_p1.Y - seg_p0.Y
+        seg_len_sq = dx * dx + dy * dy
+        if seg_len_sq < 1e-9:
+            return seg_p0, 0.0, _xy_distance(point, seg_p0)
+
+        t = ((point.X - seg_p0.X) * dx + (point.Y - seg_p0.Y) * dy) / seg_len_sq
+        t_clamped = max(0.0, min(1.0, t))
+
+        proj_point = DB.XYZ(
+            seg_p0.X + dx * t_clamped,
+            seg_p0.Y + dy * t_clamped,
+            seg_p0.Z,
+        )
+        dist = _xy_distance(point, proj_point)
+        return proj_point, t_clamped, dist
+    except Exception:
+        return None, 0.0, float('inf')
+
+
+def _is_point_in_room_host(room, point_host, link_transform):
+    """Проверяет принадлежность точки (host coords) комнате (link coords). Возвращает True/False/None."""
+    if not room or not point_host or not link_transform:
+        return None
+    try:
+        inv = link_transform.Inverse
+        point_link = inv.OfPoint(point_host)
+        return bool(room.IsPointInRoom(point_link))
+    except Exception:
+        return None
+
+
+def _get_connected_wall_candidates(current_wall, joint_point, link_doc, link_transform, preferred_dir, visited_ids, allow_backward=False):
+    """Ищет стены, примыкающие к узлу (joint_point), и ориентирует их от узла наружу.
+
+    Поддерживает 2 типа соединений:
+    - endpoint: узел совпадает с концом стены;
+    - segment: узел попадает в середину длинной стены (T-узел).
+    """
+    candidates = []
+    if not link_doc or not joint_point:
+        return candidates
+
+    try:
+        endpoint_tolerance = mm_to_ft(120)
+        segment_tolerance = mm_to_ft(120)
+        min_length = mm_to_ft(100)
+
+        walls = DB.FilteredElementCollector(link_doc) \
+            .OfCategory(DB.BuiltInCategory.OST_Walls) \
+            .WhereElementIsNotElementType() \
+            .ToElements()
+
+        for wall in walls:
+            try:
+                wall_id = wall.Id.IntegerValue
+            except Exception:
+                continue
+
+            if current_wall and wall.Id == current_wall.Id:
+                continue
+            if wall_id in visited_ids:
+                continue
+
+            wp0_t, wp1_t, wwidth, wlength, _ = _get_wall_host_geometry(wall, link_transform)
+            if not wp0_t or not wp1_t:
+                continue
+            if wlength < min_length:
+                continue
+
+            dist_to_p0 = _xy_distance(wp0_t, joint_point)
+            dist_to_p1 = _xy_distance(wp1_t, joint_point)
+            proj_point, _, dist_to_segment = _project_point_to_segment(joint_point, wp0_t, wp1_t)
+
+            connected_by_endpoint = (dist_to_p0 <= endpoint_tolerance) or (dist_to_p1 <= endpoint_tolerance)
+            connected_by_segment = dist_to_segment <= segment_tolerance
+
+            if not connected_by_endpoint and not connected_by_segment:
+                continue
+
+            local_candidates = []
+
+            if connected_by_endpoint:
+                # Классический случай: продолжаем от ближайшего конца стены
+                if dist_to_p0 <= dist_to_p1:
+                    start = wp0_t
+                    end = wp1_t
+                else:
+                    start = wp1_t
+                    end = wp0_t
+
+                seg_len = _xy_distance(start, end)
+                if seg_len >= min_length:
+                    dir_from_joint = DB.XYZ(
+                        (end.X - start.X) / seg_len,
+                        (end.Y - start.Y) / seg_len,
+                        0,
+                    )
+                    local_candidates.append((start, end, dir_from_joint, seg_len, "endpoint"))
+
+            elif connected_by_segment and proj_point:
+                # T-узел: узел лежит в середине стены, можно идти в обе стороны
+                len_to_p0 = _xy_distance(proj_point, wp0_t)
+                len_to_p1 = _xy_distance(proj_point, wp1_t)
+
+                if len_to_p0 >= min_length:
+                    dir_to_p0 = DB.XYZ(
+                        (wp0_t.X - proj_point.X) / len_to_p0,
+                        (wp0_t.Y - proj_point.Y) / len_to_p0,
+                        0,
+                    )
+                    local_candidates.append((proj_point, wp0_t, dir_to_p0, len_to_p0, "segment_to_p0"))
+
+                if len_to_p1 >= min_length:
+                    dir_to_p1 = DB.XYZ(
+                        (wp1_t.X - proj_point.X) / len_to_p1,
+                        (wp1_t.Y - proj_point.Y) / len_to_p1,
+                        0,
+                    )
+                    local_candidates.append((proj_point, wp1_t, dir_to_p1, len_to_p1, "segment_to_p1"))
+
+            for start, end, dir_from_joint, seg_len, connection_kind in local_candidates:
+                score = 0.0
+                if preferred_dir:
+                    score = preferred_dir.X * dir_from_joint.X + preferred_dir.Y * dir_from_joint.Y
+                    # Не ходим явно назад (разворот почти на 180°), если не включён relaxed fallback
+                    if (not allow_backward) and score < -0.5:
+                        continue
+
+                candidates.append({
+                    "wall": wall,
+                    "wall_id": wall_id,
+                    "start": start,
+                    "end": end,
+                    "width": wwidth,
+                    "length": seg_len,
+                    "dir": dir_from_joint,
+                    "score": score,
+                    "connection": connection_kind,
+                })
+
+        candidates.sort(key=lambda x: (x["score"], x["length"]), reverse=True)
+    except Exception:
+        return []
+
+    return candidates
+
+
+def _walk_along_connected_walls(start_wall, start_joint, remaining_distance, link_doc, link_transform, travel_dir):
+    """Проходит по смежным стенам и возвращает стену/параметр, где нужно разместить выключатель."""
+    if remaining_distance < 0:
+        remaining_distance = 0
+
+    visited_ids = set()
+    try:
+        if start_wall:
+            visited_ids.add(start_wall.Id.IntegerValue)
+    except Exception:
+        pass
+
+    current_wall = start_wall
+    current_joint = start_joint
+    preferred_dir = travel_dir
+
+    hops = 0
+    max_hops = 10
+
+    while hops < max_hops:
+        candidates = _get_connected_wall_candidates(
+            current_wall,
+            current_joint,
+            link_doc,
+            link_transform,
+            preferred_dir,
+            visited_ids,
+            allow_backward=False,
+        )
+
+        # Relaxed fallback: если строгий фильтр по направлению ничего не дал,
+        # разрешаем отклониться сильнее (нужно для неидеальных узлов/геометрии)
+        if not candidates:
+            candidates = _get_connected_wall_candidates(
+                current_wall,
+                current_joint,
+                link_doc,
+                link_transform,
+                preferred_dir,
+                visited_ids,
+                allow_backward=True,
+            )
+
+        if not candidates:
+            return None
+
+        selected = None
+        for cand in candidates:
+            if cand["length"] >= remaining_distance:
+                selected = cand
+                break
+
+        if not selected:
+            selected = candidates[0]
+
+        if remaining_distance <= selected["length"]:
+            return {
+                "wall": selected["wall"],
+                "wall_id": selected["wall_id"],
+                "wall_p0": selected["start"],
+                "wall_p1": selected["end"],
+                "wall_width": selected["width"],
+                "wall_length": selected["length"],
+                "wall_dir": selected["dir"],
+                "t_on_wall": remaining_distance,
+                "hops": hops + 1,
+            }
+
+        remaining_distance -= selected["length"]
+        visited_ids.add(selected["wall_id"])
+        current_wall = selected["wall"]
+        current_joint = selected["end"]
+        preferred_dir = selected["dir"]
+        hops += 1
+
+    return None
+
+
 def get_door_info(door, link_doc, link_transform):
     info = {
         "center": None,
@@ -550,27 +808,102 @@ def calc_switch_position(door_info, place_inside_room, reference_room, link_tran
         jamb_offset = mm_to_ft(JAMB_OFFSET_MM)
         offset_from_center = half_door + jamb_offset
 
-        t_switch = t_door_center + side_along_wall * offset_from_center
-        
-        # Ограничиваем только если выходим за пределы стены
-        # Минимальный отступ от края стены - 50мм (раньше было 100мм)
+        t_switch_raw = t_door_center + side_along_wall * offset_from_center
+
+        # Минимальный отступ от края стены
         min_edge_offset = mm_to_ft(50)
-        t_switch_clamped = max(min_edge_offset, min(length - min_edge_offset, t_switch))
-        
+        if length > 2 * min_edge_offset:
+            t_switch_clamped = max(min_edge_offset, min(length - min_edge_offset, t_switch_raw))
+        else:
+            # Для очень коротких стен не инвертируем диапазон clamp
+            t_switch_clamped = max(0.0, min(length, t_switch_raw))
+
+        # По умолчанию ставим на host-стене
+        place_wall_p0 = wall_p0
+        place_wall_p1 = wall_p1
+        place_wall_width = wall_width
+        place_wall_length = length
+        place_wall_dir = wall_dir
+        t_switch = t_switch_clamped
+
+        used_adjacent_wall = False
+        remaining_after_host = 0.0
+        chain_hops = 0
+        raw_outside_host = (t_switch_raw < 0.0 or t_switch_raw > length)
+
+        # Если смещение не помещается в host-стену, пробуем продолжить по смежным стенам
+        if (t_switch_raw < min_edge_offset or t_switch_raw > (length - min_edge_offset)) and link_doc:
+            try:
+                wall_obj = door_info.get("wall")
+                if wall_obj:
+                    t_door_center_clamped = max(0.0, min(length, t_door_center))
+                    travel_sign = 1 if side_along_wall >= 0 else -1
+                    dist_to_joint = (length - t_door_center_clamped) if travel_sign > 0 else t_door_center_clamped
+                    remaining = offset_from_center - dist_to_joint
+
+                    # Пробуем продолжить по смежной стене при ЛЮБОМ выходе за границы host
+                    if remaining > 1e-9:
+                        start_joint = wall_p1 if travel_sign > 0 else wall_p0
+                        travel_dir = wall_dir if travel_sign > 0 else DB.XYZ(-wall_dir.X, -wall_dir.Y, 0)
+
+                        walk_result = _walk_along_connected_walls(
+                            wall_obj,
+                            start_joint,
+                            remaining,
+                            link_doc,
+                            link_transform,
+                            travel_dir,
+                        )
+
+                        if walk_result:
+                            place_wall_p0 = walk_result["wall_p0"]
+                            place_wall_p1 = walk_result["wall_p1"]
+                            place_wall_width = walk_result["wall_width"]
+                            place_wall_length = walk_result["wall_length"]
+                            place_wall_dir = walk_result["wall_dir"]
+                            t_switch = walk_result["t_on_wall"]
+                            used_adjacent_wall = True
+                            remaining_after_host = remaining
+                            chain_hops = walk_result.get("hops", 0)
+                            door_info["_debug_final_wall_id"] = walk_result.get("wall_id")
+            except Exception:
+                pass
+
+        # Переопределяем рабочую стену (может быть смежная)
+        wall_dir = place_wall_dir
+        wall_normal = DB.XYZ(-wall_dir.Y, wall_dir.X, 0)
+
+        # На смежной стене стараемся сохранить остаток дистанции максимально точно
+        if used_adjacent_wall:
+            if place_wall_length > 0:
+                t_switch = max(0.0, min(place_wall_length, t_switch))
+        else:
+            if place_wall_length > 2 * min_edge_offset:
+                t_switch = max(min_edge_offset, min(place_wall_length - min_edge_offset, t_switch))
+            else:
+                t_switch = max(0.0, min(place_wall_length, t_switch))
+
+        axis_x = place_wall_p0.X + wall_dir.X * t_switch
+        axis_y = place_wall_p0.Y + wall_dir.Y * t_switch
+
+        half_width = (place_wall_width / 2.0) if place_wall_width else mm_to_ft(100)
+
         # DEBUG: сохраняем для диагностики
         door_info["_debug_wall_length"] = length
         door_info["_debug_t_door_center"] = t_door_center
-        door_info["_debug_t_switch_raw"] = t_switch
+        door_info["_debug_t_switch_raw"] = t_switch_raw
         door_info["_debug_t_switch_clamped"] = t_switch_clamped
         door_info["_debug_side_along_wall"] = side_along_wall
         door_info["_debug_offset_from_center"] = offset_from_center
-        
-        t_switch = t_switch_clamped
-
-        axis_x = wall_p0.X + wall_dir.X * t_switch
-        axis_y = wall_p0.Y + wall_dir.Y * t_switch
-
-        half_width = wall_width / 2.0
+        door_info["_debug_used_adjacent_wall"] = used_adjacent_wall
+        door_info["_debug_remaining_after_host"] = remaining_after_host
+        door_info["_debug_chain_hops"] = chain_hops
+        door_info["_debug_raw_outside_host"] = raw_outside_host
+        if not used_adjacent_wall:
+            try:
+                door_info["_debug_final_wall_id"] = door_info.get("wall").Id.IntegerValue if door_info.get("wall") else None
+            except Exception:
+                door_info["_debug_final_wall_id"] = None
 
         # Get rooms from door info
         from_room = door_info.get("from_room")
@@ -605,31 +938,122 @@ def calc_switch_position(door_info, place_inside_room, reference_room, link_tran
                     target_center = to_center
         
         surface_sign = 1  # default
-        
-        if not place_inside_room and facing:
-            # FOR WET ROOMS: facing direction is most reliable
-            # Wet room doors open OUTWARD → facing points to corridor/bedroom
-            # So switch goes on SAME side as facing
-            facing_host = link_transform.OfVector(facing)
-            facing_dot = facing_host.X * wall_normal.X + facing_host.Y * wall_normal.Y
-            surface_sign = 1 if facing_dot >= 0 else -1
-        elif target_center:
-            # For regular rooms or as fallback: use target room center
-            target_center_host = link_transform.OfPoint(target_center)
-            to_target_x = target_center_host.X - axis_x
-            to_target_y = target_center_host.Y - axis_y
-            target_dot = to_target_x * wall_normal.X + to_target_y * wall_normal.Y
-            surface_sign = 1 if target_dot >= 0 else -1
-        elif reference_room:
-            # Fallback: use current room's center
-            ref_center = get_room_center(reference_room)
-            if ref_center:
-                ref_center_host = link_transform.OfPoint(ref_center)
-                to_ref_x = ref_center_host.X - axis_x
-                to_ref_y = ref_center_host.Y - axis_y
-                ref_dot = to_ref_x * wall_normal.X + to_ref_y * wall_normal.Y
-                ref_side = 1 if ref_dot >= 0 else -1
-                surface_sign = ref_side if place_inside_room else -ref_side
+        surface_source = "default"
+
+        # --- Robust side selection by geometric probe ---
+        # Проверяем обе стороны стены через IsPointInRoom, чтобы не зависеть от
+        # from/to room assignment и ошибок в центр-точках комнат.
+        probe_eps = max(mm_to_ft(120), half_width + mm_to_ft(20))
+        probe_plus = DB.XYZ(
+            axis_x + wall_normal.X * probe_eps,
+            axis_y + wall_normal.Y * probe_eps,
+            center_host.Z,
+        )
+        probe_minus = DB.XYZ(
+            axis_x - wall_normal.X * probe_eps,
+            axis_y - wall_normal.Y * probe_eps,
+            center_host.Z,
+        )
+
+        ref_plus = _is_point_in_room_host(reference_room, probe_plus, link_transform)
+        ref_minus = _is_point_in_room_host(reference_room, probe_minus, link_transform)
+
+        target_room = None
+        if not place_inside_room and reference_room:
+            if from_room and from_room.Id == reference_room.Id:
+                target_room = to_room
+            elif to_room and to_room.Id == reference_room.Id:
+                target_room = from_room
+            if not target_room:
+                if from_room and (not reference_room or from_room.Id != reference_room.Id):
+                    target_room = from_room
+                elif to_room and (not reference_room or to_room.Id != reference_room.Id):
+                    target_room = to_room
+
+        target_plus = _is_point_in_room_host(target_room, probe_plus, link_transform) if target_room else None
+        target_minus = _is_point_in_room_host(target_room, probe_minus, link_transform) if target_room else None
+
+        # 1) Основной выбор через probe + reference room
+        if reference_room:
+            if place_inside_room:
+                # Должно быть ВНУТРИ reference_room
+                if ref_plus is True and ref_minus is not True:
+                    surface_sign = 1
+                    surface_source = "probe_ref_inside_plus"
+                elif ref_minus is True and ref_plus is not True:
+                    surface_sign = -1
+                    surface_source = "probe_ref_inside_minus"
+            else:
+                # Должно быть СНАРУЖИ reference_room
+                if ref_plus is False and ref_minus is not False:
+                    surface_sign = 1
+                    surface_source = "probe_ref_outside_plus"
+                elif ref_minus is False and ref_plus is not False:
+                    surface_sign = -1
+                    surface_source = "probe_ref_outside_minus"
+
+        # 2) Если reference probe двусмысленный - пробуем целевую комнату
+        if surface_source == "default" and target_room:
+            if place_inside_room:
+                if target_plus is True and target_minus is not True:
+                    surface_sign = 1
+                    surface_source = "probe_target_inside_plus"
+                elif target_minus is True and target_plus is not True:
+                    surface_sign = -1
+                    surface_source = "probe_target_inside_minus"
+            else:
+                if target_plus is True and target_minus is not True:
+                    surface_sign = 1
+                    surface_source = "probe_target_plus"
+                elif target_minus is True and target_plus is not True:
+                    surface_sign = -1
+                    surface_source = "probe_target_minus"
+
+        # 3) Старые fallback-правила по центрам/ориентации, если геометрический probe не помог
+        if surface_source == "default":
+            if not place_inside_room:
+                # Для влажных помещений приоритетно ставим СНАРУЖИ reference_room
+                ref_center = get_room_center(reference_room) if reference_room else None
+                if ref_center:
+                    ref_center_host = link_transform.OfPoint(ref_center)
+                    to_ref_x = ref_center_host.X - axis_x
+                    to_ref_y = ref_center_host.Y - axis_y
+                    ref_dot = to_ref_x * wall_normal.X + to_ref_y * wall_normal.Y
+                    ref_side = 1 if ref_dot >= 0 else -1
+                    surface_sign = -ref_side
+                    surface_source = "ref_outside"
+                elif target_center:
+                    # Fallback: используем центр целевой комнаты (другая сторона двери)
+                    target_center_host = link_transform.OfPoint(target_center)
+                    to_target_x = target_center_host.X - axis_x
+                    to_target_y = target_center_host.Y - axis_y
+                    target_dot = to_target_x * wall_normal.X + to_target_y * wall_normal.Y
+                    surface_sign = 1 if target_dot >= 0 else -1
+                    surface_source = "target_center"
+                elif facing:
+                    # Последний fallback
+                    facing_host = link_transform.OfVector(facing)
+                    facing_dot = facing_host.X * wall_normal.X + facing_host.Y * wall_normal.Y
+                    surface_sign = 1 if facing_dot >= 0 else -1
+                    surface_source = "facing"
+            else:
+                # Для обычных комнат: внутри reference_room / target_room
+                if target_center:
+                    target_center_host = link_transform.OfPoint(target_center)
+                    to_target_x = target_center_host.X - axis_x
+                    to_target_y = target_center_host.Y - axis_y
+                    target_dot = to_target_x * wall_normal.X + to_target_y * wall_normal.Y
+                    surface_sign = 1 if target_dot >= 0 else -1
+                    surface_source = "target_center"
+                elif reference_room:
+                    ref_center = get_room_center(reference_room)
+                    if ref_center:
+                        ref_center_host = link_transform.OfPoint(ref_center)
+                        to_ref_x = ref_center_host.X - axis_x
+                        to_ref_y = ref_center_host.Y - axis_y
+                        ref_dot = to_ref_x * wall_normal.X + to_ref_y * wall_normal.Y
+                        surface_sign = 1 if ref_dot >= 0 else -1
+                        surface_source = "ref_inside"
 
         surface_x = axis_x + wall_normal.X * half_width * surface_sign
         surface_y = axis_y + wall_normal.Y * half_width * surface_sign
@@ -637,6 +1061,15 @@ def calc_switch_position(door_info, place_inside_room, reference_room, link_tran
 
         point = DB.XYZ(surface_x, surface_y, surface_z)
         rotation = math.atan2(wall_normal.Y * surface_sign, wall_normal.X * surface_sign) - math.pi / 2
+
+        # DEBUG: side-choice diagnostics
+        door_info["_debug_surface_sign"] = surface_sign
+        door_info["_debug_surface_source"] = surface_source
+        door_info["_debug_ref_probe_plus"] = ref_plus
+        door_info["_debug_ref_probe_minus"] = ref_minus
+        door_info["_debug_target_probe_plus"] = target_plus
+        door_info["_debug_target_probe_minus"] = target_minus
+        door_info["_debug_has_target_room"] = bool(target_room)
 
         return point, rotation
 
@@ -904,10 +1337,13 @@ def find_wall_near_point(link_doc, link_transform, point, search_radius_mm=500):
         return None, None, None, None
 
 
-def calc_switch_position_from_separation_line(sep_line_info, room, link_transform, link_doc):
+def calc_switch_position_from_separation_line(sep_line_info, room, link_transform, link_doc, place_inside_room=True):
     """
     Вычисляет позицию выключателя для комнаты без двери,
     используя Room Separation Line как виртуальный вход.
+
+    Args:
+        place_inside_room: True = внутри комнаты, False = снаружи комнаты.
     """
     line_center = sep_line_info["line_center"]
     line_dir = sep_line_info["line_direction"]
@@ -960,16 +1396,49 @@ def calc_switch_position_from_separation_line(sep_line_info, room, link_transfor
     
     half_width = wall_width / 2.0 if wall_width else mm_to_ft(100)
     
-    # Определяем сторону стены (внутри комнаты)
+    # Определяем сторону стены (внутри/снаружи комнаты)
     room_center = get_room_center(room)
     surface_sign = 1
-    
-    if room_center:
-        room_center_t = link_transform.OfPoint(room_center)
-        to_room_x = room_center_t.X - axis_x
-        to_room_y = room_center_t.Y - axis_y
-        room_dot = to_room_x * wall_normal.X + to_room_y * wall_normal.Y
-        surface_sign = 1 if room_dot >= 0 else -1
+
+    # Приоритет: геометрическая проверка обеих сторон через IsPointInRoom
+    probe_eps = max(mm_to_ft(120), half_width + mm_to_ft(20))
+    probe_plus = DB.XYZ(
+        axis_x + wall_normal.X * probe_eps,
+        axis_y + wall_normal.Y * probe_eps,
+        line_center.Z,
+    )
+    probe_minus = DB.XYZ(
+        axis_x - wall_normal.X * probe_eps,
+        axis_y - wall_normal.Y * probe_eps,
+        line_center.Z,
+    )
+
+    in_plus = _is_point_in_room_host(room, probe_plus, link_transform)
+    in_minus = _is_point_in_room_host(room, probe_minus, link_transform)
+
+    if place_inside_room:
+        if in_plus is True and in_minus is not True:
+            surface_sign = 1
+        elif in_minus is True and in_plus is not True:
+            surface_sign = -1
+        elif room_center:
+            room_center_t = link_transform.OfPoint(room_center)
+            to_room_x = room_center_t.X - axis_x
+            to_room_y = room_center_t.Y - axis_y
+            room_dot = to_room_x * wall_normal.X + to_room_y * wall_normal.Y
+            surface_sign = 1 if room_dot >= 0 else -1
+    else:
+        if in_plus is False and in_minus is not False:
+            surface_sign = 1
+        elif in_minus is False and in_plus is not False:
+            surface_sign = -1
+        elif room_center:
+            room_center_t = link_transform.OfPoint(room_center)
+            to_room_x = room_center_t.X - axis_x
+            to_room_y = room_center_t.Y - axis_y
+            room_dot = to_room_x * wall_normal.X + to_room_y * wall_normal.Y
+            room_side = 1 if room_dot >= 0 else -1
+            surface_sign = -room_side
     
     surface_x = axis_x + wall_normal.X * half_width * surface_sign
     surface_y = axis_y + wall_normal.Y * half_width * surface_sign

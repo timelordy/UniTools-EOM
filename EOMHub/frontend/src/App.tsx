@@ -105,6 +105,17 @@ interface TimeSavings {
 
 type ConfirmVariant = 'default' | 'danger'
 
+type UxErrorContext = 'revit_not_ready' | 'run_dispatch' | 'job_poll' | 'cancel' | 'startup'
+
+export interface UxErrorInfo {
+  code: string
+  title: string
+  message: string
+  nextAction?: string
+  technicalMessage?: string
+  canRetry: boolean
+}
+
 interface ConfirmDialogState {
   title: string
   message: string
@@ -112,6 +123,135 @@ interface ConfirmDialogState {
   cancelLabel?: string
   variant?: ConfirmVariant
   defaultAction?: 'confirm' | 'cancel'
+}
+
+const normalizeErrorMessage = (error: unknown): string => {
+  if (!error) return ''
+  if (error instanceof Error) return error.message || ''
+  if (typeof error === 'string') return error
+  if (typeof error === 'object') {
+    const value = error as { message?: unknown; error?: unknown }
+    if (typeof value.message === 'string' && value.message.trim()) return value.message
+    if (typeof value.error === 'string' && value.error.trim()) return value.error
+  }
+  return ''
+}
+
+const includesAny = (text: string, patterns: string[]): boolean => {
+  return patterns.some((pattern) => text.includes(pattern))
+}
+
+export const mapUxError = (error: unknown, context: UxErrorContext): UxErrorInfo => {
+  const technicalMessage = normalizeErrorMessage(error).trim()
+  const source = technicalMessage.toLowerCase()
+
+  if (context === 'revit_not_ready') {
+    return {
+      code: 'REVIT_NOT_READY',
+      title: 'Revit пока не готов',
+      message: 'Инструмент нельзя запустить без активного подключения к Revit.',
+      nextAction: 'Откройте проект в Revit, нажмите кнопку Hub и дождитесь статуса «Подключено».',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (includesAny(source, ['cancelled', 'canceled', 'отмен'])) {
+    return {
+      code: 'JOB_CANCELLED',
+      title: 'Выполнение остановлено',
+      message: 'Запуск был отменён до завершения.',
+      nextAction: 'Проверьте состояние модели и запустите инструмент повторно при необходимости.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (includesAny(source, ['timeout', 'timed out', 'eel bridge timeout', 'время ожидания'])) {
+    return {
+      code: 'HUB_TIMEOUT',
+      title: 'Слишком долгий ответ от Hub',
+      message: 'Hub или Revit отвечают слишком долго, запуск не завершился вовремя.',
+      nextAction: 'Проверьте нагрузку в Revit и повторите запуск через несколько секунд.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (includesAny(source, ['failed to fetch', 'networkerror', 'err_connection', 'connection refused', 'http 500', 'http 502', 'http 503'])) {
+    return {
+      code: 'HUB_UNREACHABLE',
+      title: 'Нет связи с Hub',
+      message: 'Не удалось связаться с локальным сервером Hub.',
+      nextAction: 'Проверьте, что Hub запущен в Revit, и попробуйте снова.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (includesAny(source, ['http 401', 'http 403', 'unauthorized', 'forbidden', 'access denied'])) {
+    return {
+      code: 'ACCESS_DENIED',
+      title: 'Недостаточно прав для запуска',
+      message: 'Hub отклонил запрос из-за ограничений доступа.',
+      nextAction: 'Перезапустите Revit/Hub под нужной учётной записью или проверьте права.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: false,
+    }
+  }
+
+  if (includesAny(source, ['http 404', 'not found'])) {
+    return {
+      code: 'TOOL_NOT_FOUND',
+      title: 'Инструмент недоступен',
+      message: 'Запрошенный инструмент не найден или временно недоступен.',
+      nextAction: 'Обновите Hub и проверьте конфигурацию инструментов.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (context === 'cancel') {
+    return {
+      code: 'CANCEL_FAILED',
+      title: 'Не удалось отменить запуск',
+      message: 'Команда отмены не была доставлена в Revit.',
+      nextAction: 'Подождите завершения задачи или повторите отмену.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (context === 'startup') {
+    return {
+      code: 'STARTUP_FAILED',
+      title: 'Не удалось загрузить Hub',
+      message: 'Не получилось получить стартовые данные от сервера.',
+      nextAction: 'Проверьте подключение к Revit и обновите окно Hub.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  if (context === 'job_poll') {
+    return {
+      code: 'JOB_FAILED',
+      title: 'Инструмент завершился с ошибкой',
+      message: 'Во время выполнения возникла ошибка обработки.',
+      nextAction: 'Проверьте логи результата, исправьте данные модели и повторите запуск.',
+      technicalMessage: technicalMessage || undefined,
+      canRetry: true,
+    }
+  }
+
+  return {
+    code: 'RUN_FAILED',
+    title: 'Не удалось выполнить инструмент',
+    message: 'Команда не выполнилась из-за непредвиденной ошибки.',
+    nextAction: 'Повторите запуск. Если ошибка повторяется, проверьте подключение Hub и данные проекта.',
+    technicalMessage: technicalMessage || undefined,
+    canRetry: true,
+  }
 }
 
 let eelBridgeFailed = false
@@ -238,6 +378,7 @@ function App() {
   const [jobStatus, setJobStatus] = useState<JobStatus>('idle')
   const [jobResult, setJobResult] = useState<JobResult | null>(null)
   const [jobMessage, setJobMessage] = useState<string>('')
+  const [uxError, setUxError] = useState<UxErrorInfo | null>(null)
   const [resultTab, setResultTab] = useState<'result' | 'logs'>('result')
   const [overlayJobId, setOverlayJobId] = useState<string | null>(null)
   const overlayHideTimerRef = useRef<number | null>(null)
@@ -256,6 +397,13 @@ function App() {
     confirmResolveRef.current = null
     setConfirmDialog(null)
     resolve?.(value)
+  }, [])
+
+  const setUxErrorFrom = useCallback((error: unknown, context: UxErrorContext): UxErrorInfo => {
+    const mapped = mapUxError(error, context)
+    setUxError(mapped)
+    setJobMessage(mapped.message)
+    return mapped
   }, [])
 
   useEffect(() => {
@@ -281,6 +429,8 @@ function App() {
         setSavings(sv)
       } catch (e) {
         console.error('Failed to load data:', e)
+        setJobStatus('error')
+        setUxErrorFrom(e, 'startup')
       }
     }
 
@@ -340,8 +490,16 @@ function App() {
           if (jobId === lastJobId) {
             setJobResult(res)
             setJobStatus(status)
-            if (res.message) setJobMessage(res.message)
-            else if (res.error) setJobMessage(res.error)
+
+            if (status === 'error') {
+              setUxErrorFrom(res.error || res.message || `Задача ${jobId} завершилась с ошибкой`, 'job_poll')
+            } else if (status === 'cancelled') {
+              setUxErrorFrom(res.error || res.message || 'cancelled', 'job_poll')
+            } else {
+              setUxError(null)
+              if (res.message) setJobMessage(res.message)
+              else if (res.error) setJobMessage(res.error)
+            }
 
             if (isTerminal) {
               setRunningTool(null)
@@ -423,7 +581,7 @@ function App() {
       stopped = true
       window.clearInterval(timer)
     }
-  }, [pendingJobIds, lastJobId, countedJobIds, jobMetaById])
+  }, [pendingJobIds, lastJobId, countedJobIds, jobMetaById, setUxErrorFrom])
 
   const runningToolIds = useMemo(() => {
     const ids = new Set<string>()
@@ -452,6 +610,11 @@ function App() {
       overlayHideTimerRef.current = null
     }
 
+    if (jobStatus === 'error' && uxError) {
+      setOverlayJobId('__ux_error__')
+      return
+    }
+
     if (!lastTool || !lastJobId) {
       setOverlayJobId(null)
       return
@@ -473,9 +636,11 @@ function App() {
 
     // Default: don't show overlay for other states.
     setOverlayJobId(null)
-  }, [jobStatus, lastJobId, lastTool])
+  }, [jobStatus, lastJobId, lastTool, uxError])
 
-  const overlayVisible = Boolean(lastTool && overlayJobId && overlayJobId === lastJobId)
+  const overlayVisible = Boolean(
+    (jobStatus === 'error' && uxError) || (lastTool && lastJobId && overlayJobId && overlayJobId === lastJobId)
+  )
 
   useEffect(() => {
     if (status.connected) {
@@ -486,8 +651,10 @@ function App() {
   const handleRunTool = useCallback(async (tool: Tool) => {
     if (!status.connected) {
       setLastTool(tool)
+      setLastJobId(null)
+      setJobResult(null)
       setJobStatus('error')
-      setJobMessage('Revit не готов. Откройте проект и нажмите кнопку Hub в Revit, затем повторите.')
+      setUxErrorFrom(null, 'revit_not_ready')
       setShowConnectionHelp(true)
       setResultTab('result')
       return
@@ -513,6 +680,7 @@ function App() {
     setLastJobId(null) // Сбрасываем старый job_id
     setJobResult(null)
     setJobMessage('')
+    setUxError(null)
     setJobStatus('pending')
     setResultTab('result')
 
@@ -520,6 +688,7 @@ function App() {
       const result = await runTool(tool.id)
 
       if (result.success) {
+        setUxError(null)
         setLastJobId(result.job_id || null)
         setJobMessage(result.message || 'Команда отправлена в Revit')
         const jobId = result.job_id
@@ -536,17 +705,17 @@ function App() {
       } else {
         setLastJobId(null)
         setJobStatus('error')
-        setJobMessage(result.error || 'Не удалось отправить команду в Revit')
+        setUxErrorFrom(result.error || result.message || 'Не удалось отправить команду в Revit', 'run_dispatch')
         setRunningTool(null)
       }
     } catch (e) {
       console.error('Failed to run tool:', e)
       setLastJobId(null)
       setJobStatus('error')
-      setJobMessage((e as Error).message || 'Не удалось отправить команду в Revit')
+      setUxErrorFrom(e, 'run_dispatch')
       setRunningTool(null)
     }
-  }, [config, requestConfirm, status.connected])
+  }, [config, requestConfirm, setUxErrorFrom, status.connected])
 
   const handleResetSavings = useCallback(async () => {
     const ok = await requestConfirm({
@@ -564,8 +733,10 @@ function App() {
       setSavings(newSavings)
     } catch (e) {
       console.error('Failed to reset savings:', e)
+      setJobStatus('error')
+      setUxErrorFrom(e, 'startup')
     }
-  }, [requestConfirm])
+  }, [requestConfirm, setUxErrorFrom])
 
   const handleCancel = useCallback(async () => {
     if (!jobStatus || jobStatus === 'completed' || jobStatus === 'error' || jobStatus === 'cancelled') return
@@ -579,11 +750,14 @@ function App() {
       } else {
         await runTool('cancel')
       }
+      setUxError(null)
       setJobMessage('Запрос на отмену отправлен...')
     } catch (e) {
       console.error('Failed to cancel:', e)
+      setJobStatus('error')
+      setUxErrorFrom(e, 'cancel')
     }
-  }, [jobStatus, lastJobId])
+  }, [jobStatus, lastJobId, setUxErrorFrom])
 
   // Group tools by category
   const toolsByCategory = config ? Object.values(config.tools).reduce((acc, tool) => {
@@ -808,8 +982,8 @@ function App() {
                       </pre>
                     )}
 
-                    {jobStatus === 'error' && jobResult?.error && (
-                      <div className="result-error">{jobResult.error}</div>
+                    {jobStatus === 'error' && (
+                      <div className="result-error">{uxError?.message || jobResult?.error || jobMessage}</div>
                     )}
                   </>
                 ) : (
@@ -845,6 +1019,7 @@ function App() {
         queueLabel={queueLabel}
         stats={jobResult?.stats || resolvedStats || null}
         summary={jobResult?.summary || null}
+        uxError={uxError}
         canCancel={jobStatus === 'pending' || jobStatus === 'running'}
         onCancel={handleCancel}
       />

@@ -94,9 +94,43 @@ def run(doc, output):
     entrance_door_patterns = rules.get('entrance_door_name_patterns', [
         'вход', 'входн', 'entry', 'entrance', 'тамбур', 'вестиб', 'металл', 'сталь', 'дм_'
     ])
+    # Для домофона приоритет: входные + стальные двери.
+    # Даже если в rules нет стальных паттернов, добавим безопасные дефолты.
+    for _ep in ('металл', 'сталь', 'steel', 'metal', 'дм_', 'дм-'):
+        try:
+            if _ep not in entrance_door_patterns:
+                entrance_door_patterns.append(_ep)
+        except Exception:
+            pass
+
+    try:
+        apt_param_names = list((rules.get('apartment_param_names', []) or []))
+    except Exception:
+        apt_param_names = []
+    try:
+        apt_require_param = bool(rules.get('apartment_require_param', True))
+    except Exception:
+        apt_require_param = True
+    try:
+        apt_allow_department = bool(rules.get('apartment_allow_department_fallback', False))
+    except Exception:
+        apt_allow_department = False
+    try:
+        apt_allow_room_number = bool(rules.get('apartment_allow_room_number_fallback', False))
+    except Exception:
+        apt_allow_room_number = False
 
     # Priority for Router placement: Hallway
-    hallway_keys = ['прихож', 'холл', 'hall', 'corridor', 'коридор']
+    try:
+        hallway_keys = list((rules.get('hallway_room_name_patterns', []) or []))
+    except Exception:
+        hallway_keys = []
+    for _hk in ['прихож', 'холл', 'hall', 'corridor', 'коридор', 'корид', 'квартир', 'передн', 'тамбур', 'вестиб', 'lobby', 'foyer']:
+        try:
+            if _hk not in hallway_keys:
+                hallway_keys.append(_hk)
+        except Exception:
+            pass
 
     intercom_pts = []
     cabinet_pts = []
@@ -144,6 +178,9 @@ def run(doc, output):
     placed_total = 0
 
     max_wall_dist_ft = mm_to_ft(rules.get('ac_wall_search_max_dist_mm', constants.DEFAULT_MAX_WALL_DIST_MM) or constants.DEFAULT_MAX_WALL_DIST_MM)
+
+    # Diagnostics for apartment-aware recovery quality in real projects.
+    low_voltage_debug = bool(rules.get('low_voltage_debug', True))
 
     with forms.ProgressBar(title='06. Слаботочка...', cancellable=True) as pb:
         pb.max_value = len(rooms)
@@ -324,15 +361,178 @@ def run(doc, output):
         except Exception:
             return None
 
+    def _contains_any(text, patterns):
+        try:
+            txt = (text or '').lower()
+        except Exception:
+            txt = ''
+        for p in (patterns or []):
+            try:
+                pp = (p or '').lower()
+            except Exception:
+                pp = ''
+            if pp and (pp in txt):
+                return True
+        return False
+
+    def _room_has_hallway_name(room_obj):
+        try:
+            room_name = (getattr(room_obj, 'Name', '') or '').lower()
+        except Exception:
+            room_name = ''
+        return _contains_any(room_name, hallway_keys)
+
+    def _room_apartment_number_strict(room_obj):
+        if room_obj is None:
+            return None
+
+        def _clean(v):
+            try:
+                s = (v or '').strip()
+            except Exception:
+                s = ''
+            if not s:
+                return ''
+            low = s.lower()
+            for prefix in ('кв.', 'кв', 'квартира', 'apt.', 'apt', 'apartment', 'flat'):
+                if low.startswith(prefix):
+                    s = s[len(prefix):].strip()
+                    break
+            try:
+                s = s.upper()
+            except Exception:
+                pass
+            return s
+
+        def _is_valid(v):
+            try:
+                vv = (v or '').strip().lower()
+            except Exception:
+                vv = ''
+            if not vv:
+                return False
+            if vv in ('квартира', 'apartment', 'flat', 'room', 'моп'):
+                return False
+            return any(ch.isdigit() for ch in vv)
+
+        for pname in (apt_param_names or []):
+            try:
+                p = room_obj.LookupParameter(pname)
+            except Exception:
+                p = None
+            if not p:
+                continue
+            val = ''
+            try:
+                val = p.AsString() or ''
+            except Exception:
+                val = ''
+            cval = _clean(val)
+            if _is_valid(cval):
+                return cval
+
+        if apt_allow_department:
+            try:
+                p_dep = room_obj.get_Parameter(DB.BuiltInParameter.ROOM_DEPARTMENT)
+                dep = p_dep.AsString() if p_dep else ''
+            except Exception:
+                dep = ''
+            cdep = _clean(dep)
+            if _is_valid(cdep):
+                return cdep
+
+        if apt_allow_room_number:
+            try:
+                p_num = room_obj.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER)
+                num = p_num.AsString() if p_num else ''
+            except Exception:
+                num = ''
+            cnum = _clean(num)
+            if _is_valid(cnum):
+                return cnum
+
+        return None
+
+    def _room_has_apartment(room_obj):
+        try:
+            strict_val = _room_apartment_number_strict(room_obj)
+            if strict_val:
+                return True
+            if apt_require_param:
+                return False
+            return bool(su.get_room_apartment_number(room_obj))
+        except Exception:
+            return False
+
+    def _room_apartment_number(room_obj):
+        try:
+            strict_val = _room_apartment_number_strict(room_obj)
+            if strict_val:
+                return strict_val
+        except Exception:
+            pass
+        if apt_require_param:
+            return None
+        try:
+            val = su.get_room_apartment_number(room_obj)
+            return str(val) if val else None
+        except Exception:
+            return None
+
+    # Soft apartment detection for low-voltage recovery:
+    # if strict apartment params are unavailable, still try generic extractor
+    # so placement can scale with apartment count in real models.
+    def _room_apartment_number_soft(room_obj):
+        try:
+            strict_val = _room_apartment_number_strict(room_obj)
+            if strict_val:
+                return strict_val
+        except Exception:
+            pass
+
+        try:
+            val = su.get_room_apartment_number(room_obj)
+            if val:
+                return str(val)
+        except Exception:
+            pass
+
+        # No generic ROOM_NUMBER fallback here:
+        # requirement is one outlet per APARTMENT, so key must represent apartment,
+        # not potentially arbitrary room numbering.
+        return None
+
+    def _room_has_apartment_soft(room_obj):
+        try:
+            return bool(_room_apartment_number_soft(room_obj))
+        except Exception:
+            return False
+
     def _collect_hallway_rooms():
         out = []
         for r in (rooms or []):
-            try:
-                room_name = (getattr(r, 'Name', '') or '').lower()
-            except Exception:
-                room_name = ''
-            if any(k in room_name for k in hallway_keys):
+            if _room_has_hallway_name(r):
                 out.append(r)
+        return out
+
+    def _collect_apartment_hallway_rooms():
+        out = []
+        for r in (rooms or []):
+            try:
+                if _room_has_hallway_name(r) and _room_has_apartment_soft(r):
+                    out.append(r)
+            except Exception:
+                continue
+        return out
+
+    def _collect_apartment_rooms():
+        out = []
+        for r in (rooms or []):
+            try:
+                if _room_has_apartment_soft(r):
+                    out.append(r)
+            except Exception:
+                continue
         return out
 
     def _collect_entrance_doors():
@@ -344,6 +544,285 @@ def run(doc, output):
             except Exception:
                 continue
         return out
+
+    def _door_adjacent_rooms(door_obj):
+        out = []
+        if door_obj is None or link_doc is None:
+            return out
+
+        phases = []
+        try:
+            created_phase_id = getattr(door_obj, 'CreatedPhaseId', DB.ElementId.InvalidElementId)
+            if created_phase_id and created_phase_id != DB.ElementId.InvalidElementId:
+                created_phase = link_doc.GetElement(created_phase_id)
+                if created_phase is not None:
+                    phases.append(created_phase)
+        except Exception:
+            phases = []
+
+        if not phases:
+            try:
+                all_phases = list(link_doc.Phases)
+                if all_phases:
+                    phases.append(all_phases[-1])
+            except Exception:
+                phases = []
+
+        tried = set()
+
+        def _append_room(room_obj):
+            if room_obj is None:
+                return
+            try:
+                rid = int(room_obj.Id.IntegerValue)
+            except Exception:
+                rid = id(room_obj)
+            if rid in tried:
+                return
+            tried.add(rid)
+            out.append(room_obj)
+
+        for ph in (phases or [None]):
+            for getter_name in ('FromRoom', 'ToRoom'):
+                room_obj = None
+                try:
+                    getter = getattr(door_obj, getter_name, None)
+                except Exception:
+                    getter = None
+
+                if getter is None:
+                    _append_room(None)
+                    continue
+
+                try:
+                    if ph is not None:
+                        room_obj = getter[ph]
+                    else:
+                        room_obj = getter
+                except Exception:
+                    try:
+                        room_obj = getter
+                    except Exception:
+                        room_obj = None
+
+                _append_room(room_obj)
+
+        return out
+
+    def _is_apartment_entrance_door(door_obj):
+        if door_obj is None:
+            return False
+
+        rooms_adj = _door_adjacent_rooms(door_obj)
+        if not rooms_adj:
+            return False
+
+        try:
+            has_named_entrance = bool(domain.is_entrance_door(door_obj, entrance_door_patterns))
+        except Exception:
+            has_named_entrance = False
+
+        apt_keys = []
+        has_hall_apartment = False
+        has_non_apartment = False
+
+        for rr in rooms_adj:
+            try:
+                apt_key = _room_apartment_number_soft(rr)
+            except Exception:
+                apt_key = None
+
+            if apt_key:
+                apt_key = str(apt_key)
+                if apt_key not in apt_keys:
+                    apt_keys.append(apt_key)
+                try:
+                    if _room_has_hallway_name(rr):
+                        has_hall_apartment = True
+                except Exception:
+                    pass
+            else:
+                has_non_apartment = True
+
+        # No apartment-side room => definitely not apartment entrance.
+        if not apt_keys:
+            return False
+
+        # Door between different apartment keys is not a valid apartment entrance candidate.
+        if len(apt_keys) > 1:
+            return False
+
+        # Reject typical internal apartment door: both adjacent rooms belong to same apartment.
+        if (not has_non_apartment) and len(rooms_adj) >= 2:
+            return False
+
+        # Strong signal: apartment hallway side + non-apartment side (or one-sided relation in broken links).
+        if has_hall_apartment and (has_non_apartment or len(rooms_adj) == 1):
+            return True
+
+        # Named entrance with apartment-side relation is also acceptable.
+        if has_named_entrance and (has_hall_apartment or has_non_apartment):
+            return True
+
+        # Last fallback for poor naming: one apartment key + split to non-apartment side.
+        return bool(has_non_apartment)
+
+    def _collect_apartment_entrance_doors():
+        out = []
+        for d in (doors or []):
+            try:
+                if _is_apartment_entrance_door(d):
+                    out.append(d)
+            except Exception:
+                continue
+        return out
+
+    def _build_apartment_door_map(door_pool):
+        # Returns apartment_key -> list[(door, room)]
+        # Strict intent: one intercom socket per apartment,
+        # place from apartment hallway near apartment entrance steel door.
+        apt_map = {}
+
+        # 1) Group rooms by apartment key.
+        apt_rooms_by_key = {}
+        for rr in (apartment_rooms_all or []):
+            apt_key = _room_apartment_number_soft(rr)
+            if not apt_key:
+                continue
+            apt_key = str(apt_key)
+            bucket = apt_rooms_by_key.get(apt_key)
+            if bucket is None:
+                bucket = []
+                apt_rooms_by_key[apt_key] = bucket
+            bucket.append(rr)
+
+        if not apt_rooms_by_key:
+            return apt_map
+
+        # 2) Keep apartment entrance candidates.
+        # Prefer room-relation based detection, keep name-based detection as backup.
+        entrance_pool = []
+        known_apt_door_ids = set()
+        for d0 in (apartment_entrance_doors or []):
+            try:
+                known_apt_door_ids.add(int(d0.Id.IntegerValue))
+            except Exception:
+                known_apt_door_ids.add(id(d0))
+
+        for d in (door_pool or []):
+            try:
+                did = int(d.Id.IntegerValue)
+            except Exception:
+                did = id(d)
+
+            is_candidate = did in known_apt_door_ids
+
+            if not is_candidate:
+                try:
+                    is_candidate = bool(_is_apartment_entrance_door(d))
+                except Exception:
+                    is_candidate = False
+
+            if not is_candidate:
+                try:
+                    is_candidate = bool(domain.is_entrance_door(d, entrance_door_patterns))
+                except Exception:
+                    is_candidate = False
+
+            if is_candidate:
+                entrance_pool.append(d)
+
+        if not entrance_pool:
+            return apt_map
+
+        def _preferred_room_for_apartment(apt_key, door_obj=None):
+            rooms_for_apt = list(apt_rooms_by_key.get(str(apt_key), []) or [])
+            if not rooms_for_apt:
+                return None
+
+            hall_rooms = [r for r in rooms_for_apt if _room_has_hallway_name(r)]
+            # Hard preference: hallway/прихожая room. If absent, use any room of apartment.
+            pool = hall_rooms if hall_rooms else rooms_for_apt
+
+            if door_obj is not None:
+                ranked = _sorted_rooms_for_door(door_obj, pool)
+                if ranked:
+                    return ranked[0]
+            return pool[0]
+
+        def _append_candidate(apt_key, door_obj, room_obj):
+            if not apt_key or door_obj is None or room_obj is None:
+                return
+            apt_key = str(apt_key)
+            bucket = apt_map.get(apt_key)
+            if bucket is None:
+                bucket = []
+                apt_map[apt_key] = bucket
+
+            try:
+                did_new = int(door_obj.Id.IntegerValue)
+            except Exception:
+                did_new = id(door_obj)
+
+            for d_old, _ in bucket:
+                try:
+                    did_old = int(d_old.Id.IntegerValue)
+                except Exception:
+                    did_old = id(d_old)
+                if did_old == did_new:
+                    return
+
+            bucket.append((door_obj, room_obj))
+
+        # 3) Primary mapping by strict door-room adjacency.
+        #    Accept only apartment keys that are directly adjacent to the door.
+        for d in entrance_pool:
+            adj_rooms = _door_adjacent_rooms(d)
+            if not adj_rooms:
+                continue
+
+            adj_keys = []
+            for rr in adj_rooms:
+                apt_key = _room_apartment_number_soft(rr)
+                if not apt_key:
+                    continue
+                apt_key = str(apt_key)
+                if apt_key not in adj_keys:
+                    adj_keys.append(apt_key)
+
+            if not adj_keys:
+                continue
+
+            for apt_key in adj_keys:
+                apt_room = _preferred_room_for_apartment(apt_key, d)
+                if apt_room is None:
+                    continue
+                _append_candidate(apt_key, d, apt_room)
+
+        # 4) Fallback: only unresolved apartments, pick nearest entrance/steel door
+        #    from apartment hallway (or apartment room if hallway not detected).
+        for apt_key in sorted(apt_rooms_by_key.keys()):
+            if apt_map.get(apt_key):
+                continue
+
+            pref_room = _preferred_room_for_apartment(apt_key, None)
+            if pref_room is None:
+                continue
+
+            nearest_doors = _sorted_doors_for_room(pref_room, entrance_pool)
+            if not nearest_doors:
+                continue
+
+            # Try a few nearest entrance doors and keep the best room/door pair.
+            for d0 in nearest_doors[:6]:
+                apt_room = _preferred_room_for_apartment(apt_key, d0) or pref_room
+                if apt_room is None:
+                    continue
+                _append_candidate(apt_key, d0, apt_room)
+                if apt_map.get(apt_key):
+                    break
+
+        return apt_map
 
     def _sorted_doors_for_room(room_obj, door_pool):
         center = _room_center_xy(room_obj)
@@ -357,6 +836,21 @@ def run(doc, output):
             except Exception:
                 dxy = 0.0
             ranked.append((float(dxy), d))
+        ranked.sort(key=lambda x: x[0])
+        return [x[1] for x in ranked]
+
+    def _sorted_rooms_for_door(door_obj, room_pool):
+        door_center = su._inst_center_point(door_obj)
+        ranked = []
+        for r in (room_pool or []):
+            center = _room_center_xy(r)
+            if center is None or door_center is None:
+                continue
+            try:
+                dxy = su._dist_xy(center, door_center)
+            except Exception:
+                dxy = 1e12
+            ranked.append((float(dxy), r))
         ranked.sort(key=lambda x: x[0])
         return [x[1] for x in ranked]
 
@@ -556,9 +1050,12 @@ def run(doc, output):
         return 0
 
     hallway_rooms = _collect_hallway_rooms()
+    apartment_hallway_rooms = _collect_apartment_hallway_rooms()
+    apartment_rooms_all = _collect_apartment_rooms()
     fallback_rooms = hallway_rooms if hallway_rooms else list(rooms)
 
     entrance_doors = _collect_entrance_doors()
+    apartment_entrance_doors = _collect_apartment_entrance_doors()
     fallback_doors = entrance_doors if entrance_doors else list(doors)
 
     # Final guarantee: если не поставили ни одной слаботочной розетки,
@@ -631,48 +1128,233 @@ def run(doc, output):
         except Exception:
             log_exception()
 
-    # Recovery pass: если общий результат все еще слишком мал,
-    # пытаемся доразместить домофонные розетки по входным дверям (мягкий режим).
-    try:
-        recovery_threshold = int(rules.get('low_voltage_min_intercom_recovery_count', 2) or 2)
-    except Exception:
-        recovery_threshold = 2
+    # Apartment-scale recovery: РОВНО 1 домофонная розетка на 1 квартиру,
+    # размещение у входной стальной двери квартиры.
+    placed_apartment_recovery = 0
+    apartment_target = 0
+    apartment_resolved = 0
 
-    if doors and placed_total < recovery_threshold:
+    if doors:
         try:
-            recovery_pool = list(entrance_doors) if entrance_doors else list(fallback_doors)
-            if recovery_pool:
-                placed_recovery = 0
-                for room in fallback_rooms:
+            def _unique_doors(door_pool):
+                out = []
+                seen = set()
+                for dd in (door_pool or []):
+                    try:
+                        did = int(dd.Id.IntegerValue)
+                    except Exception:
+                        did = id(dd)
+                    if did in seen:
+                        continue
+                    seen.add(did)
+                    out.append(dd)
+                return out
+
+            apartment_door_pool = (
+                list(apartment_entrance_doors)
+                if apartment_entrance_doors
+                else (list(entrance_doors) if entrance_doors else list(doors))
+            )
+            apartment_door_pool = _unique_doors(apartment_door_pool)
+
+            # If strict entrance detection produced too few candidates, broaden to all doors;
+            # _build_apartment_door_map still keeps only entrance steel doors with apartment-side split.
+            if len(apartment_door_pool) < 3:
+                apartment_door_pool = _unique_doors(list(apartment_door_pool) + list(doors))
+
+            apt_to_candidates = _build_apartment_door_map(apartment_door_pool)
+            if not apt_to_candidates:
+                apt_to_candidates = _build_apartment_door_map(list(doors))
+
+            # Hard requirement from user: if it is an apartment,
+            # placement is mandatory (target = all apartments), not only "candidate" apartments.
+            apt_rooms_by_key = {}
+            for rr in (apartment_rooms_all or []):
+                apt_key = _room_apartment_number_soft(rr)
+                if not apt_key:
+                    continue
+                apt_key = str(apt_key)
+                bucket = apt_rooms_by_key.get(apt_key)
+                if bucket is None:
+                    bucket = []
+                    apt_rooms_by_key[apt_key] = bucket
+                bucket.append(rr)
+
+            apartment_keys_all = sorted(apt_rooms_by_key.keys())
+            apartment_target = len(apartment_keys_all)
+
+            for apt_key in apartment_keys_all:
+                if apt_key not in apt_to_candidates:
+                    apt_to_candidates[apt_key] = []
+
+            def _forced_candidates_for_apartment(apt_key):
+                out = []
+                rooms_for_apt = list(apt_rooms_by_key.get(str(apt_key), []) or [])
+                if not rooms_for_apt:
+                    return out
+
+                hall_rooms = [r for r in rooms_for_apt if _room_has_hallway_name(r)]
+                room_pool = hall_rooms if hall_rooms else rooms_for_apt
+
+                door_pool_candidates = []
+                if apartment_door_pool:
+                    door_pool_candidates.extend(list(apartment_door_pool))
+                if entrance_doors:
+                    door_pool_candidates.extend(list(entrance_doors))
+                if doors:
+                    door_pool_candidates.extend(list(doors))
+
+                door_pool_candidates = _unique_doors(door_pool_candidates)
+                if not door_pool_candidates:
+                    return out
+
+                ranked_doors = []
+                for d in door_pool_candidates:
+                    ranked_rooms = _sorted_rooms_for_door(d, room_pool)
+                    best_room = ranked_rooms[0] if ranked_rooms else room_pool[0]
+                    dc = su._inst_center_point(d)
+                    rc = _room_center_xy(best_room)
+                    try:
+                        dist = su._dist_xy(dc, rc) if dc is not None and rc is not None else 1e12
+                    except Exception:
+                        dist = 1e12
+                    ranked_doors.append((float(dist), d, best_room))
+
+                ranked_doors.sort(key=lambda x: x[0])
+                for _, d, r in ranked_doors[:10]:
+                    out.append((d, r))
+                return out
+
+            apartments_with_candidates = 0
+            for apt_key in apartment_keys_all:
+                if apt_to_candidates.get(apt_key):
+                    apartments_with_candidates += 1
+
+            if low_voltage_debug:
+                try:
+                    output.print_md(
+                        '- Apartment detection: apartment_rooms={0}, apartment_hallways={1}, doors_total={2}, entrance_doors={3}, apartment_doors={4}, apartment_target={5}, apt_with_candidates={6}'.format(
+                            len(apartment_rooms_all),
+                            len(apartment_hallway_rooms),
+                            len(doors),
+                            len(entrance_doors),
+                            len(apartment_door_pool),
+                            apartment_target,
+                            apartments_with_candidates,
+                        )
+                    )
+                except Exception:
+                    pass
+
+            # Attempt placement per apartment key (MANDATORY: exactly one success per apartment key)
+            for apt_key in apartment_keys_all:
+                candidates = list(apt_to_candidates.get(apt_key, []) or [])
+                if not candidates:
+                    candidates = _forced_candidates_for_apartment(apt_key)
+                    if candidates:
+                        apt_to_candidates[apt_key] = list(candidates)
+                if not candidates:
+                    continue
+
+                ranked = []
+                seen_local = set()
+                for d, r in candidates:
+                    try:
+                        did = int(d.Id.IntegerValue)
+                    except Exception:
+                        did = id(d)
+                    if did in seen_local:
+                        continue
+                    seen_local.add(did)
+
+                    dc = su._inst_center_point(d)
+                    rc = _room_center_xy(r)
+                    try:
+                        dist = su._dist_xy(dc, rc) if dc is not None and rc is not None else 1e12
+                    except Exception:
+                        dist = 1e12
+                    ranked.append((float(dist), d, r))
+
+                ranked.sort(key=lambda x: x[0])
+
+                placed_for_apt = False
+                for _, door, room in ranked:
                     center_xy = _room_center_xy(room)
-                    for door in _sorted_doors_for_room(room, recovery_pool):
+                    pick = domain.pick_room_door_handle_side(room, [door], center_xy, door_probe_ft)
+                    room_normal = pick[2] if pick is not None else None
+                    handle_dir = pick[3] if pick is not None else None
+
+                    placed_add = _try_place_intercom_for_room_door(
+                        room,
+                        door,
+                        strict_mode=False,
+                        room_normal=room_normal,
+                        handle_dir=handle_dir,
+                    )
+                    if placed_add > 0:
+                        placed_total += placed_add
+                        placed_apartment_recovery += placed_add
+                        placed_for_apt = True
+                        break
+
+                if placed_for_apt:
+                    apartment_resolved += 1
+
+            if apartment_target > 0:
+                output.print_md(
+                    '- Apartment recovery: дополнительно создано {0} розеток домофона (квартир-цель: {1})'.format(
+                        placed_apartment_recovery,
+                        apartment_target,
+                    )
+                )
+                if apartment_resolved < apartment_target:
+                    output.print_md(
+                        '- Apartment recovery: не удалось разместить розетку для {0} квартир (проверьте геометрию/хостинг/семейство)'.format(
+                            int(apartment_target - apartment_resolved)
+                        )
+                    )
+
+            # Legacy minimum fallback (kept as safety net when apartment data is unavailable)
+            try:
+                recovery_threshold = int(rules.get('low_voltage_min_intercom_recovery_count', 2) or 2)
+            except Exception:
+                recovery_threshold = 2
+
+            if placed_total < recovery_threshold:
+                recovery_pool = list(entrance_doors) if entrance_doors else list(fallback_doors)
+                if recovery_pool:
+                    placed_recovery = 0
+                    for room in fallback_rooms:
+                        center_xy = _room_center_xy(room)
+                        for door in _sorted_doors_for_room(room, recovery_pool):
+                            if placed_total >= recovery_threshold:
+                                break
+
+                            pick = domain.pick_room_door_handle_side(room, [door], center_xy, door_probe_ft)
+                            room_normal = pick[2] if pick is not None else None
+                            handle_dir = pick[3] if pick is not None else None
+
+                            placed_add = _try_place_intercom_for_room_door(
+                                room,
+                                door,
+                                strict_mode=False,
+                                room_normal=room_normal,
+                                handle_dir=handle_dir,
+                            )
+                            if placed_add > 0:
+                                placed_total += placed_add
+                                placed_recovery += placed_add
                         if placed_total >= recovery_threshold:
                             break
 
-                        pick = domain.pick_room_door_handle_side(room, [door], center_xy, door_probe_ft)
-                        room_normal = pick[2] if pick is not None else None
-                        handle_dir = pick[3] if pick is not None else None
-
-                        placed_add = _try_place_intercom_for_room_door(
-                            room,
-                            door,
-                            strict_mode=False,
-                            room_normal=room_normal,
-                            handle_dir=handle_dir,
+                    if placed_recovery > 0:
+                        output.print_md(
+                            '- Recovery fallback: дополнительно создано {0} розеток домофона (цель минимум: {1})'.format(
+                                placed_recovery,
+                                recovery_threshold,
+                            )
                         )
-                        if placed_add > 0:
-                            placed_total += placed_add
-                            placed_recovery += placed_add
-                    if placed_total >= recovery_threshold:
-                        break
 
-                if placed_recovery > 0:
-                    output.print_md(
-                        '- Recovery fallback: дополнительно создано {0} розеток домофона (цель минимум: {1})'.format(
-                            placed_recovery,
-                            recovery_threshold,
-                        )
-                    )
         except Exception:
             log_exception()
 

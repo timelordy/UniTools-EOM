@@ -29,6 +29,7 @@ from adapters import (
     get_switch_symbol,
     is_entrance_door,
     place_switch,
+    prefer_farther_candidate,
 )
 from constants import (
     COMMENT_TAG,
@@ -116,6 +117,11 @@ def main():
     created = 0
     skipped = 0
 
+    # Дедупликация внутри запуска: один выключатель на одну комнату
+    # (ключ: link_instance_id::room_id). Это исключает случай, когда в выборку rooms
+    # попали дублирующиеся записи одной и той же комнаты.
+    processed_room_keys = set()
+
     with DB.Transaction(doc, u"ЭОМ: Выключатели") as t:
         t.Start()
 
@@ -123,11 +129,24 @@ def main():
             room_name = get_room_name(room)
             room_id = room.Id.IntegerValue
 
+            # 1 room = 1 switch (dedupe by stable key)
+            room_key = None
+            try:
+                room_key = u"{}::{}".format(link_inst.Id.IntegerValue, room_id)
+            except Exception:
+                room_key = None
+            if room_key and room_key in processed_room_keys:
+                continue
+
             if contains_any(room_name, SKIP_ROOMS):
+                if room_key:
+                    processed_room_keys.add(room_key)
                 continue
 
             # Пропускаем общедомовые помещения (не квартирные)
             if contains_any(room_name, NON_APARTMENT_ROOMS):
+                if room_key:
+                    processed_room_keys.add(room_key)
                 continue
 
             is_corridor = contains_any(room_name, CORRIDOR_ROOMS)
@@ -148,6 +167,8 @@ def main():
                     use_separation_line = True
                 else:
                     skipped += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
                     continue
             
             door_list = room_to_doors.get(room_id, [])
@@ -157,13 +178,13 @@ def main():
                 is_wet = contains_any(room_name, WET_ROOMS)
                 is_two_gang = contains_any(room_name, TWO_GANG_ROOMS)
                 best_info = None  # Нет двери
-                
+
                 symbol = sym_2g if is_two_gang else sym_1g
-                
+
                 point, rotation = calc_switch_position_from_separation_line(
                     sep_line_info, room, link_transform, link_doc, place_inside_room=(not is_wet)
                 )
-                
+
                 if created < 3 or "кухн" in room_name.lower():
                     output.print_md(u"")
                     output.print_md(u"**{}** (via Room Separation Line)".format(room_name))
@@ -173,79 +194,151 @@ def main():
                             ft_to_mm(point.X), ft_to_mm(point.Y), ft_to_mm(point.Z)))
                     else:
                         output.print_md(u"  switch: NONE (no wall found?)")
-                
+
                 if not point:
                     skipped += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
                     continue
-                
+
                 level = get_closest_level(doc, point.Z)
                 if not level:
                     skipped += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
                     continue
-                
+
                 inst = place_switch(doc, symbol, point, rotation, level)
                 if inst:
                     created += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
                 else:
                     skipped += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
                 continue  # Переходим к следующей комнате
 
             # Для прихожих/коридоров - ищем входную дверь
+            is_wet = False
+            is_two_gang = False
+            place_inside = True
+            symbol = sym_1g
+            best_info = None
+            point = None
+            rotation = None
+            best_distance_ft = None
+            selected_candidate_index = None
+
             if is_corridor:
-                entrance_door = None
-                entrance_info = None
-                
-                for door, info in door_list:
-                    if is_entrance_door(info):
-                        entrance_door = door
-                        entrance_info = info
-                        break
-                
-                if not entrance_door:
-                    # Входная дверь не найдена - пропускаем
+                # Среди входных дверей выбираем наиболее удалённую позицию выключателя
+                # (если несколько валидных дверей/кандидатов).
+                for door_idx, (door, info) in enumerate(door_list):
+                    if not is_entrance_door(info):
+                        continue
+                    cand_point, cand_rotation = calc_switch_position(
+                        info, True, room, link_transform, link_doc
+                    )
+                    if not cand_point:
+                        continue
+
+                    cand_distance_ft = None
+                    if info.get("center"):
+                        c = link_transform.OfPoint(info["center"])
+                        dx = cand_point.X - c.X
+                        dy = cand_point.Y - c.Y
+                        cand_distance_ft = math.sqrt(dx * dx + dy * dy)
+
+                    if best_info is None:
+                        replace = True
+                    else:
+                        replace = prefer_farther_candidate(best_distance_ft, cand_distance_ft)
+
+                    if replace:
+                        best_info = info
+                        point = cand_point
+                        rotation = cand_rotation
+                        best_distance_ft = cand_distance_ft
+                        selected_candidate_index = door_idx
+
+                if not best_info:
+                    # Входная дверь/точка не найдена - пропускаем
                     skipped += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
                     continue
-                
-                # Ставим выключатель около входной двери (внутри прихожей)
-                best_door = entrance_door
-                best_info = entrance_info
-                other_room = None  # Снаружи - не комната
+
                 is_wet = False
                 is_two_gang = False  # В прихожей 1-клавишный
-                place_inside = True  # Внутри прихожей
+                place_inside = True   # Внутри прихожей
+                symbol = sym_1g
             else:
-                # Для обычных комнат - ищем дверь в коридор
-                best_door = None
-                best_info = None
-                other_room = None
-
-                for door, info in door_list:
-                    fr = info["from_room"]
-                    tr = info["to_room"]
-                    other = tr if (fr and fr.Id == room.Id) else fr
-                    other_name = get_room_name(other) if other else u""
-
-                    if contains_any(other_name, CORRIDOR_ROOMS):
-                        best_door = door
-                        best_info = info
-                        other_room = other
-                        break
-
-                if not best_door:
-                    best_door, best_info = door_list[0]
-                    fr = best_info["from_room"]
-                    tr = best_info["to_room"]
-                    other_room = tr if (fr and fr.Id == room.Id) else fr
-
+                # Для обычных комнат: считаем всех кандидатов.
+                # Для санузлов (is_wet=True) допускаем только двери, ведущие в прихожую/коридор.
                 is_wet = contains_any(room_name, WET_ROOMS)
                 is_two_gang = contains_any(room_name, TWO_GANG_ROOMS)
                 place_inside = not is_wet
+                symbol = sym_2g if is_two_gang else sym_1g
 
-            symbol = sym_2g if is_two_gang else sym_1g
+                for door_idx, (door, info) in enumerate(door_list):
+                    other = None
+                    fr = info.get("from_room")
+                    tr = info.get("to_room")
+                    if fr and hasattr(fr, "Id") and fr.Id == room.Id:
+                        other = tr
+                    else:
+                        other = fr
+                    other_name = get_room_name(other) if other else u""
+                    corridor_bonus = 1 if contains_any(other_name, CORRIDOR_ROOMS) else 0
 
-            point, rotation = calc_switch_position(
-                best_info, place_inside, room, link_transform, link_doc
-            )
+                    # Ключевое правило: выключатель санузла снаружи размещаем ТОЛЬКО в прихожей/коридоре.
+                    if is_wet and corridor_bonus == 0:
+                        continue
+
+                    cand_point, cand_rotation = calc_switch_position(
+                        info, place_inside, room, link_transform, link_doc
+                    )
+                    if not cand_point:
+                        continue
+
+                    cand_distance_ft = None
+                    if info.get("center"):
+                        c = link_transform.OfPoint(info["center"])
+                        dx = cand_point.X - c.X
+                        dy = cand_point.Y - c.Y
+                        cand_distance_ft = math.sqrt(dx * dx + dy * dy)
+
+                    if best_info is None:
+                        replace = True
+                    else:
+                        best_other = None
+                        bfr = best_info.get("from_room")
+                        btr = best_info.get("to_room")
+                        if bfr and hasattr(bfr, "Id") and bfr.Id == room.Id:
+                            best_other = btr
+                        else:
+                            best_other = bfr
+                        best_other_name = get_room_name(best_other) if best_other else u""
+                        best_corridor_bonus = 1 if contains_any(best_other_name, CORRIDOR_ROOMS) else 0
+
+                        replace = False
+                        if corridor_bonus > best_corridor_bonus:
+                            replace = True
+                        elif corridor_bonus == best_corridor_bonus:
+                            replace = prefer_farther_candidate(best_distance_ft, cand_distance_ft)
+
+                    if replace:
+                        best_info = info
+                        point = cand_point
+                        rotation = cand_rotation
+                        best_distance_ft = cand_distance_ft
+                        selected_candidate_index = door_idx
+
+                if not best_info:
+                    skipped += 1
+                    if room_key:
+                        processed_room_keys.add(room_key)
+                    continue
 
             if created < 3 or "спальн" in room_name.lower():
                 output.print_md(u"")
@@ -285,6 +378,8 @@ def main():
                 if point:
                     output.print_md(u"  switch: ({:.0f}, {:.0f}, {:.0f}) mm".format(
                         ft_to_mm(point.X), ft_to_mm(point.Y), ft_to_mm(point.Z)))
+                    if selected_candidate_index is not None:
+                        output.print_md(u"  selected candidate index: {}".format(selected_candidate_index))
                     if best_info["center"]:
                         c = link_transform.OfPoint(best_info["center"])
                         dist = math.sqrt((point.X - c.X) ** 2 + (point.Y - c.Y) ** 2)
@@ -323,18 +418,26 @@ def main():
 
             if not point:
                 skipped += 1
+                if room_key:
+                    processed_room_keys.add(room_key)
                 continue
 
             level = get_closest_level(doc, point.Z)
             if not level:
                 skipped += 1
+                if room_key:
+                    processed_room_keys.add(room_key)
                 continue
 
             inst = place_switch(doc, symbol, point, rotation, level)
             if inst:
                 created += 1
+                if room_key:
+                    processed_room_keys.add(room_key)
             else:
                 skipped += 1
+                if room_key:
+                    processed_room_keys.add(room_key)
 
         t.Commit()
 

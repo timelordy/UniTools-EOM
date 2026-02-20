@@ -10,8 +10,9 @@ from pyrevit import script
 
 import config_loader
 import link_reader
+import magic_context
 import placement_engine
-from utils_revit import alert, ensure_symbol_active, log_exception, set_comments, set_mark, tx
+from utils_revit import alert, ensure_symbol_active, find_nearest_level, log_exception, set_comments, set_mark, tx
 from time_savings import report_time_saved
 from utils_units import mm_to_ft
 try:
@@ -51,6 +52,58 @@ def _is_tbo_room_name(room_name):
     tbo_keywords = [u'тбо', u'тб', u'мусор', u'мусорокамера', u'мусорная']
     for kw in tbo_keywords:
         if kw in name_lower:
+            return True
+    return False
+
+
+TECH_ROOM_NAME_PATTERNS_DEFAULT = [
+    u'тех',
+    u'техничес',
+    u'техэтаж',
+    u'итп',
+    u'венткамер',
+    u'машин',
+    u'насосн',
+    u'сервер',
+    u'электрощ',
+    u'щитовая',
+    u'tech',
+    u'technical',
+    u'utility',
+    u'service',
+]
+TECH_ROOM_NAME_PATTERNS = list(TECH_ROOM_NAME_PATTERNS_DEFAULT)
+
+
+def _normalize_room_name_patterns(values):
+    out = []
+    for v in list(values or []):
+        try:
+            t = (v or u'').strip().lower()
+        except Exception:
+            t = u''
+        if t:
+            out.append(t)
+    return out
+
+
+def _is_technical_room_name(room_name):
+    """Проверить, является ли помещение техническим (по паттернам имени)."""
+    if not room_name:
+        return False
+    try:
+        name_lower = room_name.lower().strip()
+    except Exception:
+        name_lower = u''
+    if not name_lower:
+        return False
+    patterns = TECH_ROOM_NAME_PATTERNS or TECH_ROOM_NAME_PATTERNS_DEFAULT
+    for kw in patterns:
+        try:
+            k = (kw or u'').strip().lower()
+        except Exception:
+            k = u''
+        if k and (k in name_lower):
             return True
     return False
 
@@ -1583,18 +1636,9 @@ def _try_get_apartment_number(door, link_doc):
 
 def _door_head_point_link(door):
     """Return placement point in LINK coordinates: above door head center."""
-    # Best: bounding box
-    try:
-        bb = door.get_BoundingBox(None)
-        if bb:
-            cx = (bb.Min.X + bb.Max.X) * 0.5
-            cy = (bb.Min.Y + bb.Max.Y) * 0.5
-            z = bb.Max.Z
-            return DB.XYZ(cx, cy, z)
-    except Exception:
-        pass
-
-    # Fallback: location + head height
+    # Prefer insertion point + head height.
+    # Some door families have oversized bbox in Z (symbolic/extra geometry), which shifts
+    # panel placement by one storey when using bb.Max.Z directly.
     try:
         loc = door.Location
         pt = loc.Point if loc and hasattr(loc, 'Point') else None
@@ -1610,7 +1654,20 @@ def _door_head_point_link(door):
         z = pt.Z + (float(head) if head else 0.0)
         return DB.XYZ(pt.X, pt.Y, z)
     except Exception:
-        return None
+        pass
+
+    # Fallback: bounding box
+    try:
+        bb = door.get_BoundingBox(None)
+        if bb:
+            cx = (bb.Min.X + bb.Max.X) * 0.5
+            cy = (bb.Min.Y + bb.Max.Y) * 0.5
+            z = bb.Max.Z
+            return DB.XYZ(cx, cy, z)
+    except Exception:
+        pass
+
+    return None
 
 
 def _door_center_point_link(door):
@@ -1642,18 +1699,12 @@ def _door_head_z_link(door):
     if door is None:
         return None
 
-    try:
-        bb = door.get_BoundingBox(None)
-        if bb:
-            return float(bb.Max.Z)
-    except Exception:
-        pass
-
+    # Prefer insertion point + head height.
     try:
         loc = getattr(door, 'Location', None)
         pt = loc.Point if loc and hasattr(loc, 'Point') else None
         if pt is None:
-            return None
+            raise Exception('Door has no location point')
         head = None
         try:
             p = door.get_Parameter(DB.BuiltInParameter.INSTANCE_HEAD_HEIGHT_PARAM)
@@ -1665,7 +1716,165 @@ def _door_head_z_link(door):
             return float(pt.Z)
         return float(pt.Z) + float(head)
     except Exception:
+        pass
+
+    # Fallback: bounding box
+    try:
+        bb = door.get_BoundingBox(None)
+        if bb:
+            return float(bb.Max.Z)
+    except Exception:
+        pass
+
+    return None
+
+
+def _safe_level_id_int(level_id):
+    if level_id is None:
         return None
+    try:
+        if level_id == DB.ElementId.InvalidElementId:
+            return None
+    except Exception:
+        pass
+    try:
+        if hasattr(level_id, 'IntegerValue'):
+            v = int(level_id.IntegerValue)
+        else:
+            v = int(level_id)
+    except Exception:
+        return None
+    return v if v > 0 else None
+
+
+def _try_get_level_id_from_param(elem, bip):
+    if elem is None or bip is None:
+        return None
+    try:
+        p = elem.get_Parameter(bip)
+    except Exception:
+        p = None
+    if p is None:
+        return None
+    try:
+        return _safe_level_id_int(p.AsElementId())
+    except Exception:
+        return None
+
+
+def _resolve_element_level_id_int(elem):
+    """Best-effort resolve of element level id for linked doors."""
+    if elem is None:
+        return None
+
+    try:
+        lid = _safe_level_id_int(getattr(elem, 'LevelId', None))
+    except Exception:
+        lid = None
+    if lid is not None:
+        return lid
+
+    for bip_name in (
+        'INSTANCE_REFERENCE_LEVEL_PARAM',
+        'FAMILY_LEVEL_PARAM',
+        'SCHEDULE_LEVEL_PARAM',
+        'LEVEL_PARAM',
+    ):
+        try:
+            bip = getattr(DB.BuiltInParameter, bip_name, None)
+        except Exception:
+            bip = None
+        lid = _try_get_level_id_from_param(elem, bip)
+        if lid is not None:
+            return lid
+
+    return None
+
+
+def _get_level_elevation_ft(level):
+    if level is None:
+        return None
+    try:
+        return float(level.Elevation)
+    except Exception:
+        return None
+
+
+def _resolve_door_level_elevation_ft(door, link_doc, level_id_int=None):
+    if door is None:
+        return None
+
+    lid = level_id_int
+    if lid is None:
+        lid = _resolve_element_level_id_int(door)
+
+    if link_doc is not None and lid is not None:
+        try:
+            lvl = link_doc.GetElement(DB.ElementId(int(lid)))
+        except Exception:
+            lvl = None
+        elev = _get_level_elevation_ft(lvl)
+        if elev is not None:
+            return elev
+
+    try:
+        c = _door_center_point_link(door)
+        if c is not None:
+            return float(c.Z)
+    except Exception:
+        pass
+    return None
+
+
+def _match_selected_level_by_elevation(z_ft, selected_levels_meta, tol_ft=None):
+    if z_ft is None:
+        return None
+
+    if tol_ft is None:
+        try:
+            tol_ft = float(mm_to_ft(1000) or 3.280839895)
+        except Exception:
+            tol_ft = 3.280839895
+
+    best_level_id = None
+    best_delta = None
+    for meta in list(selected_levels_meta or []):
+        try:
+            elev = meta.get('elev', None)
+            level_id = meta.get('id', None)
+        except Exception:
+            continue
+        if elev is None or level_id is None:
+            continue
+        try:
+            delta = abs(float(z_ft) - float(elev))
+        except Exception:
+            continue
+        if best_delta is None or delta < best_delta:
+            best_delta = delta
+            best_level_id = int(level_id)
+
+    if best_level_id is None or best_delta is None:
+        return None
+    if float(best_delta) <= float(tol_ft):
+        return best_level_id
+    return None
+
+
+def _door_on_selected_levels(door, link_doc, selected_level_ids, selected_levels_meta):
+    if not selected_level_ids:
+        return True
+
+    level_id_int = _resolve_element_level_id_int(door)
+    if level_id_int is not None and level_id_int in selected_level_ids:
+        return True
+
+    z_ft = _resolve_door_level_elevation_ft(door, link_doc, level_id_int=level_id_int)
+    matched_level_id = _match_selected_level_by_elevation(z_ft, selected_levels_meta)
+    if matched_level_id is not None and matched_level_id in selected_level_ids:
+        return True
+
+    return False
 
 
 def _room_center_fast(room):
@@ -1980,7 +2189,26 @@ def _room_is_tbo(room):
     return bool(_is_tbo_room_name(name))
 
 
-def _door_has_tbo_room(door, link_doc):
+def _room_is_technical(room):
+    if room is None:
+        return False
+    try:
+        name = _get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_NAME, name='Name')
+    except Exception:
+        name = u''
+    if not name:
+        try:
+            name = getattr(room, 'Name', u'') or u''
+        except Exception:
+            name = u''
+    return bool(_is_technical_room_name(name))
+
+
+def _room_is_excluded_for_panel(room):
+    return bool(_room_is_tbo(room) or _room_is_technical(room))
+
+
+def _door_has_excluded_room(door, link_doc):
     if door is None or link_doc is None:
         return False
     try:
@@ -1989,7 +2217,7 @@ def _door_has_tbo_room(door, link_doc):
         phases = []
     try:
         for r in _iter_from_to_rooms(door, phases):
-            if _room_is_tbo(r):
+            if _room_is_excluded_for_panel(r):
                 return True
     except Exception:
         return False
@@ -2566,6 +2794,248 @@ def _try_get_depth_ft(symbol, inst=None):
     return None
 
 
+def _instance_bbox_min_z(inst):
+    if inst is None:
+        return None
+    try:
+        bb = inst.get_BoundingBox(None)
+    except Exception:
+        bb = None
+    if bb is None:
+        try:
+            d = getattr(inst, 'Document', None)
+            if d is not None:
+                d.Regenerate()
+        except Exception:
+            pass
+        try:
+            bb = inst.get_BoundingBox(None)
+        except Exception:
+            bb = None
+    if bb is None:
+        return None
+    try:
+        return float(bb.Min.Z)
+    except Exception:
+        return None
+
+
+def _align_instance_bottom_to_target_z(doc_, inst, target_bottom_z):
+    """Move instance vertically so that its bbox bottom aligns with target Z."""
+    if doc_ is None or inst is None or target_bottom_z is None:
+        return False
+
+    z_min = _instance_bbox_min_z(inst)
+    if z_min is None:
+        return False
+
+    try:
+        dz = float(target_bottom_z) - float(z_min)
+    except Exception:
+        return False
+
+    try:
+        tol = float(mm_to_ft(1) or 0.0)
+    except Exception:
+        tol = 0.0
+    if abs(dz) <= tol:
+        return True
+
+    try:
+        DB.ElementTransformUtils.MoveElement(doc_, inst.Id, DB.XYZ(0.0, 0.0, float(dz)))
+        return True
+    except Exception:
+        return False
+
+
+def _collect_host_levels_sorted(doc_):
+    if doc_ is None:
+        return []
+    try:
+        levels = list(DB.FilteredElementCollector(doc_).OfClass(DB.Level).ToElements())
+    except Exception:
+        levels = []
+    pairs = []
+    for lvl in levels:
+        try:
+            pairs.append((float(lvl.Elevation), lvl))
+        except Exception:
+            continue
+    pairs.sort(key=lambda x: x[0])
+    return [lvl for _, lvl in pairs]
+
+
+def _find_nearest_level_from_levels(levels, z_ft):
+    if not levels:
+        return None
+    best = None
+    best_d = None
+    for lvl in levels:
+        if lvl is None:
+            continue
+        try:
+            d = abs(float(lvl.Elevation) - float(z_ft))
+        except Exception:
+            continue
+        if best is None or d < best_d:
+            best = lvl
+            best_d = d
+    return best
+
+
+def _set_element_level_param(elem, level):
+    if elem is None or level is None:
+        return False
+    try:
+        level_id = level.Id
+    except Exception:
+        return False
+
+    bips = []
+    for bip_name in (
+        'FAMILY_LEVEL_PARAM',
+        'INSTANCE_REFERENCE_LEVEL_PARAM',
+        'SCHEDULE_LEVEL_PARAM',
+        'LEVEL_PARAM',
+        'RBS_START_LEVEL_PARAM',
+    ):
+        try:
+            bip = getattr(DB.BuiltInParameter, bip_name, None)
+        except Exception:
+            bip = None
+        if bip is not None:
+            bips.append(bip)
+
+    for bip in bips:
+        try:
+            p = elem.get_Parameter(bip)
+        except Exception:
+            p = None
+        if p is None:
+            continue
+        try:
+            if p.IsReadOnly or p.StorageType != DB.StorageType.ElementId:
+                continue
+            p.Set(level_id)
+            return True
+        except Exception:
+            continue
+
+    for pname in (u'Уровень', u'Базовый уровень', u'Reference Level', u'Level'):
+        try:
+            p = elem.LookupParameter(pname)
+        except Exception:
+            p = None
+        if p is None:
+            continue
+        try:
+            if p.IsReadOnly or p.StorageType != DB.StorageType.ElementId:
+                continue
+            p.Set(level_id)
+            return True
+        except Exception:
+            continue
+
+    return False
+
+
+def _set_instance_elevation_from_level(elem, target_z, level):
+    if elem is None or target_z is None or level is None:
+        return False
+    try:
+        off = float(target_z) - float(level.Elevation)
+    except Exception:
+        return False
+
+    try:
+        p = elem.get_Parameter(DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM)
+    except Exception:
+        p = None
+    if p is not None:
+        try:
+            if (not p.IsReadOnly) and p.StorageType == DB.StorageType.Double:
+                p.Set(float(off))
+                return True
+        except Exception:
+            pass
+
+    for pname in (
+        u'Отметка от уровня',
+        u'Смещение от уровня',
+        u'Elevation from Level',
+        u'Offset from Level',
+    ):
+        try:
+            p = elem.LookupParameter(pname)
+        except Exception:
+            p = None
+        if p is None:
+            continue
+        try:
+            if (not p.IsReadOnly) and p.StorageType == DB.StorageType.Double:
+                p.Set(float(off))
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
+def _sync_instance_level_and_bottom(doc_, inst, target_bottom_z, host_levels=None):
+    """Best-effort sync of level/offset parameters while keeping bottom-of-panel on target Z."""
+    if doc_ is None or inst is None or target_bottom_z is None:
+        return False
+
+    changed = False
+    lvl = _find_nearest_level_from_levels(host_levels or [], target_bottom_z)
+    if lvl is None:
+        try:
+            lvl = find_nearest_level(doc_, target_bottom_z)
+        except Exception:
+            lvl = None
+
+    level_param_set = False
+    offset_param_set = False
+    if lvl is not None:
+        try:
+            if _set_element_level_param(inst, lvl):
+                changed = True
+                level_param_set = True
+        except Exception:
+            pass
+        try:
+            if _set_instance_elevation_from_level(inst, target_bottom_z, lvl):
+                changed = True
+                offset_param_set = True
+        except Exception:
+            pass
+
+    if level_param_set or offset_param_set:
+        try:
+            doc_.Regenerate()
+        except Exception:
+            pass
+
+    try:
+        if _align_instance_bottom_to_target_z(doc_, inst, target_bottom_z):
+            changed = True
+    except Exception:
+        pass
+
+    # One more pass after regeneration for families with delayed geometry updates.
+    try:
+        doc_.Regenerate()
+    except Exception:
+        pass
+    try:
+        if _align_instance_bottom_to_target_z(doc_, inst, target_bottom_z):
+            changed = True
+    except Exception:
+        pass
+
+    return changed
+
+
 def _bbox_extents_along_dir(inst, origin_pt, dir_unit):
     """Return (min_rel, max_rel) of instance bbox projected onto dir_unit, relative to origin_pt."""
     if inst is None or origin_pt is None or dir_unit is None:
@@ -3022,43 +3492,80 @@ def _pick_linked_doors(link_inst):
     return picked
 
 
-def main():
-    output.print_md('# Размещение щитов ШК над входной дверью квартиры')
-    output.print_md('Документ (ЭОМ): `{0}`'.format(doc.Title))
+def _prepare_context_and_config():
+    link_inst = None
+    if bool(getattr(magic_context, 'FORCE_SELECTION', False)) or bool(getattr(magic_context, 'IS_RUNNING', False)):
+        try:
+            link_inst = getattr(magic_context, 'SELECTED_LINK', None)
+        except Exception:
+            link_inst = None
 
-    link_inst = link_reader.select_link_instance(doc, title='Выберите связь АР')
+    if link_inst is None:
+        link_inst = link_reader.select_link_instance(doc, title='Выберите связь АР')
     if link_inst is None:
         output.print_md('**Отменено.**')
-        return
+        return None
     if not link_reader.is_link_loaded(link_inst):
         alert('Выбранная связь не загружена. Загрузите её в «Управление связями» и повторите.')
-        return
+        return None
 
     link_doc = link_reader.get_link_doc(link_inst)
     if link_doc is None:
         alert('Не удалось получить доступ к документу связи. Убедитесь, что связь загружена.')
-        return
+        return None
 
     output.print_md('Выбранная связь: `{0}`'.format(link_inst.Name))
-    
-    # Pre-check: does the link have rooms?
+
     try:
         all_rooms = link_reader.get_rooms(link_doc)
         room_count = len(all_rooms)
     except Exception:
         room_count = 0
-    
+
     if room_count == 0:
         alert('В выбранной связи АР не найдено ни одного помещения (Rooms).\n\n'
               'Скрипт использует помещения для определения входных дверей квартир.\n'
               'Убедитесь, что в связи размещены помещения, или выберите другой файл.')
-        return
-        
+        return None
+
     output.print_md('Найдено помещений в связи: **{0}**'.format(room_count))
 
+    selected_levels = link_reader.select_levels_multi(link_doc, title=u'Выберите этажи')
+    if not selected_levels:
+        output.print_md('**Отменено (уровни не выбраны).**')
+        return None
+
+    selected_level_ids = set()
+    selected_levels_meta = []
+    seen_level_ids = set()
+    skipped_nonpositive_levels = 0
+    for lvl in selected_levels:
+        try:
+            lid = int(lvl.Id.IntegerValue)
+            elev = _get_level_elevation_ft(lvl)
+            # Process only floors strictly above +0.000.
+            if elev is None or float(elev) <= 0.0:
+                skipped_nonpositive_levels += 1
+                continue
+            if lid > 0:
+                selected_level_ids.add(lid)
+                if lid not in seen_level_ids:
+                    selected_levels_meta.append({
+                        'id': lid,
+                        'elev': elev,
+                    })
+                    seen_level_ids.add(lid)
+        except Exception:
+            continue
+    if not selected_level_ids:
+        output.print_md('**Отменено (нет уровней выше +0.000).**')
+        return None
+    if skipped_nonpositive_levels:
+        output.print_md(u'Исключено уровней с отметкой <= +0.000: **{0}**'.format(skipped_nonpositive_levels))
+    output.print_md('Выбрано уровней: **{0}**'.format(len(selected_level_ids)))
+
     rules = config_loader.load_rules()
-    # Apartment param rules (strict by default)
-    global APT_PARAM_NAMES, APT_REQUIRE_PARAM, APT_ALLOW_DEPARTMENT, APT_ALLOW_NUMBER
+    global APT_PARAM_NAMES, APT_REQUIRE_PARAM, APT_ALLOW_DEPARTMENT, APT_ALLOW_NUMBER, TECH_ROOM_NAME_PATTERNS
     try:
         APT_PARAM_NAMES = list((rules.get('apartment_param_names', []) or []))
     except Exception:
@@ -3077,16 +3584,34 @@ def main():
         APT_ALLOW_NUMBER = bool(rules.get('apartment_allow_room_number_fallback', False))
     except Exception:
         APT_ALLOW_NUMBER = False
+    try:
+        tech_patterns = list((rules.get('panel_technical_room_name_patterns', []) or []))
+    except Exception:
+        tech_patterns = []
+    if not tech_patterns:
+        try:
+            tech_patterns = list((rules.get('switch_technical_room_name_patterns', []) or []))
+        except Exception:
+            tech_patterns = []
+    tech_patterns = _normalize_room_name_patterns(tech_patterns)
+    if tech_patterns:
+        TECH_ROOM_NAME_PATTERNS = tech_patterns
+    else:
+        TECH_ROOM_NAME_PATTERNS = list(TECH_ROOM_NAME_PATTERNS_DEFAULT)
+
     comment_tag = rules.get('comment_tag', 'AUTO_EOM')
-    offset_mm = rules.get('panel_above_door_offset_mm', 300)
+    offset_mm = int(rules.get('panel_above_door_offset_mm', 100) or 100)
     user_offset_mm = _ask_for_mm_value(
-        prompt=u'Высота размещения над дверью (мм)',
+        prompt=u'Высота низа щита над верхом двери (мм)',
         title=u'Щит над дверью',
         default_mm=offset_mm,
     )
     if user_offset_mm is None:
-        return
-    offset_mm = user_offset_mm
+        return None
+    offset_mm = int(user_offset_mm)
+    if offset_mm < 0:
+        offset_mm = 0
+    output.print_md(u'Высота размещения (низ щита над верхом двери): **{0} мм**'.format(offset_mm))
     recess_mm = rules.get('panel_recess_mm', 40)
     dedupe_mm = rules.get('dedupe_radius_mm', 500)
     batch_size = int(rules.get('batch_size', 25) or 25)
@@ -3095,15 +3620,33 @@ def main():
     offset_ft = mm_to_ft(offset_mm) or 0.0
     recess_ft = mm_to_ft(recess_mm) or 0.0
     dedupe_ft = mm_to_ft(dedupe_mm) or 0.0
-
     fam_fullname = (rules.get('family_type_names', {}) or {}).get('panel_shk') or ''
     variant_param_name = (rules.get('panel_shk_variant_param', '') or '').strip()
 
+    return {
+        'link_inst': link_inst,
+        'link_doc': link_doc,
+        'comment_tag': comment_tag,
+        'offset_mm': offset_mm,
+        'recess_mm': recess_mm,
+        'dedupe_mm': dedupe_mm,
+        'batch_size': batch_size,
+        'scan_limit_doors': scan_limit_doors,
+        'max_place': max_place,
+        'offset_ft': offset_ft,
+        'recess_ft': recess_ft,
+        'dedupe_ft': dedupe_ft,
+        'fam_fullname': fam_fullname,
+        'variant_param_name': variant_param_name,
+        'selected_level_ids': selected_level_ids,
+        'selected_levels_meta': selected_levels_meta,
+    }
+
+
+def _prepare_symbol_and_variant(fam_fullname, variant_param_name):
     cfg = _get_user_config()
     symbol, picked_label, top10 = _pick_panel_symbol(doc, cfg, fam_fullname)
     if symbol is None:
-        # Some panel families keep module variants as Yes/No type parameters (not separate types).
-        # In that case `fam_fullname` can be a *parameter name* like "...-18 модулей...".
         variant_candidate = variant_param_name or fam_fullname
         if variant_candidate:
             try:
@@ -3122,7 +3665,7 @@ def main():
         msg = 'В проекте не найден тип семейства щита из правил:\n\n  {0}\n\n'.format(fam_fullname or '<пусто>')
         if top10:
             msg += 'Похожие варианты (первые 10):\n- ' + '\n- '.join([x for x in top10 if x])
-        msg += '\n\nВыбрать тип вручную?' 
+        msg += '\n\nВыбрать тип вручную?'
 
         try:
             pick_manual = forms.alert(msg, title='Размещение щитов ШК', warn_icon=True, yes=True, no=True)
@@ -3130,19 +3673,18 @@ def main():
             pick_manual = False
 
         if not pick_manual:
-            return
+            return None
 
         symbol = _select_panel_symbol_ui(doc, prefer_fullname=fam_fullname)
         if symbol is None:
             output.print_md('**Отменено.**')
-            return
+            return None
         try:
             picked_label = placement_engine.format_family_type(symbol)
         except Exception:
             picked_label = None
         top10 = []
 
-    # Apply variant selection if configured (or if config string is actually a param name)
     variant_candidate = variant_param_name
     if not variant_candidate:
         try:
@@ -3163,7 +3705,6 @@ def main():
         except Exception:
             pass
 
-    # Finalize selected type state (disable other module options like "-4")
     if variant_candidate and symbol is not None:
         try:
             with tx('ЭОМ: Пост-фикс типа щита ШК (модули)', doc=doc, swallow_warnings=True):
@@ -3175,7 +3716,6 @@ def main():
         for x in top10:
             output.print_md('- `{0}`'.format(x))
 
-    # Cache for next run
     try:
         _store_symbol_id(cfg, 'last_panel_shk_symbol_id', symbol)
         _store_symbol_unique_id(cfg, 'last_panel_shk_symbol_uid', symbol)
@@ -3191,21 +3731,19 @@ def main():
         is_point = False
     if not (is_point or _is_hosted_symbol(symbol)):
         alert('Выбранный тип щита не поддерживается этим инструментом (тип размещения: {0}).'.format(pt_name))
-        return
+        return None
 
-    # Scan ALL doors (avoids user mis-picking a level and missing entrance doors)
-    lvl = None
+    return {'symbol': symbol, 'variant_candidate': variant_candidate, 'is_point': is_point}
+
+
+def _select_target_doors(link_doc, link_inst, scan_limit_doors, selected_level_ids=None, selected_levels_meta=None):
     level_id = None
-
-    # Identify candidate doors (per-door priority)
-    # All entrance doors are steel (project convention)
-    # PLUS check rooms to ensure it's an apartment entrance
+    selected_level_ids = set(selected_level_ids or [])
+    selected_levels_meta = list(selected_levels_meta or [])
     target_doors = []
     di = 0
-    
-    # Log rejection reasons for debugging the first few failures
     debug_log = []
-    
+
     pb_max = scan_limit_doors if scan_limit_doors > 0 else 500
     with forms.ProgressBar(title='ЭОМ: Поиск дверей (связь АР)', cancellable=True, step=1) as pbscan:
         pbscan.max_value = pb_max
@@ -3216,42 +3754,33 @@ def main():
                 break
 
             try:
+                if selected_level_ids:
+                    if not _door_on_selected_levels(d, link_doc, selected_level_ids, selected_levels_meta):
+                        continue
+
                 tname = _door_family_type_text(d)
                 if not _has_any_keyword(tname, STEEL_FAMILY_KEYWORDS):
-                    # if len(debug_log) < 10: debug_log.append(u"Skip '{0}': not steel".format(tname))
                     continue
-                
-                # Strict apartment check
+
                 is_apt = _is_confirmed_apartment_door(d, link_doc)
                 if not is_apt:
-                    # VERBOSE DIAGNOSTIC FOR FIRST 3 FAILURES
                     if len(debug_log) < 3:
                         output.print_md('---')
                         output.print_md('**DEBUG DIAGNOSTIC for: {0} (Id: {1})**'.format(tname, d.Id))
-                        
-                        # 1. Phases
                         all_phases = list(link_doc.Phases)
                         output.print_md('Link Phases: ' + ', '.join(['{0} (Id: {1})'.format(p.Name, p.Id) for p in all_phases]))
-                        
-                        # 2. Geometry
                         try:
                             loc = d.Location
                             if loc and hasattr(loc, 'Point'):
                                 pt = loc.Point
                                 output.print_md('Door Point: X={0:.2f}, Y={1:.2f}, Z={2:.2f}'.format(pt.X, pt.Y, pt.Z))
-                                
-                                # Probe points
                                 probes = []
-                                # Center + 1ft up
                                 probes.append(('Center+1ft', DB.XYZ(pt.X, pt.Y, pt.Z + 1.0)))
-                                # Offsets
                                 if hasattr(d, 'FacingOrientation'):
                                     f = d.FacingOrientation
                                     off = f * 1.3
                                     probes.append(('Front+1ft', DB.XYZ(pt.X + off.X, pt.Y + off.Y, pt.Z + 1.0)))
                                     probes.append(('Back+1ft', DB.XYZ(pt.X - off.X, pt.Y - off.Y, pt.Z + 1.0)))
-                                
-                                # Check each probe against ALL phases
                                 for pname, ppt in probes:
                                     output.print_md('  Probe **{0}** ({1:.2f}, {2:.2f}, {3:.2f}):'.format(pname, ppt.X, ppt.Y, ppt.Z))
                                     found_any = False
@@ -3269,47 +3798,41 @@ def main():
                             output.print_md('Diagnostic Error: {0}'.format(ex))
                         output.print_md('---')
 
-                    if len(debug_log) < 15: 
-                        # Get room names for debug
+                    if len(debug_log) < 15:
                         try:
-                            # Try to reproduce logic from _is_confirmed_apartment_door for logging
                             ph = list(link_doc.Phases)[-1]
                             try:
                                 ph_id = getattr(d, 'CreatedPhaseId', DB.ElementId.InvalidElementId)
                                 if ph_id != DB.ElementId.InvalidElementId:
                                     p_obj = link_doc.GetElement(ph_id)
-                                    if p_obj: ph = p_obj
-                            except: pass
-                            
+                                    if p_obj:
+                                        ph = p_obj
+                            except:
+                                pass
                             r1 = d.get_FromRoom(ph)
                             r2 = d.get_ToRoom(ph)
-                            
-                            # Fallback if get_FromRoom(ph) fails
                             if not r1 and not r2:
                                 r1 = getattr(d, 'FromRoom', None)
-                                if r1 and hasattr(r1, 'getitem'): r1 = r1[ph]
+                                if r1 and hasattr(r1, 'getitem'):
+                                    r1 = r1[ph]
                                 r2 = getattr(d, 'ToRoom', None)
-                                if r2 and hasattr(r2, 'getitem'): r2 = r2[ph]
-                                
+                                if r2 and hasattr(r2, 'getitem'):
+                                    r2 = r2[ph]
                             n1 = getattr(r1, 'Name', 'None')
                             n2 = getattr(r2, 'Name', 'None')
                             debug_log.append(u"Skip '{0}': rooms {1}/{2} not Apt+Out (Phase: {3}) -> REJECTED (no apartment)".format(tname, n1, n2, ph.Name if ph else '?'))
                         except:
                             debug_log.append(u"Skip '{0}': rooms check failed -> REJECTED (no apartment)".format(tname))
-                    # Skip doors without confirmed apartment rooms
                     continue
-                if _door_has_tbo_room(d, link_doc):
-                    # Skip doors adjacent to TBO rooms
+
+                if _door_has_excluded_room(d, link_doc):
                     continue
-                
+
                 target_doors.append(d)
             except Exception:
                 continue
 
-    reason = 'Авто: только стальные двери и только при наличии квартиры у помещения (параметр/номер квартиры)'
-
     if not target_doors:
-        # Help user understand why detection failed
         sample = []
         try:
             i = 0
@@ -3327,23 +3850,82 @@ def main():
         msg = 'Автоматически не найдено ни одной стальной двери в выбранной связи АР.\n'
         msg += 'Сканируемая связь: {0}\n\n'.format(link_inst.Name)
         msg += 'Ожидается, что в названии семейства/типа двери есть одно из: {0}\n\n'.format(', '.join([str(x) for x in STEEL_FAMILY_KEYWORDS]))
-        
         if debug_log:
             msg += 'Причины пропуска (первые 15):\n' + '\n'.join(debug_log) + '\n\n'
-            
         if sample:
             msg += 'Примеры названий семейства/типа дверей (первые 10):\n- ' + '\n- '.join([s for s in sample if s])
-
         forms.alert(msg, title='Размещение щитов ШК', warn_icon=True)
-        return
+        return None
 
-    output.print_md('Режим выбора дверей: **{0}**'.format(reason))
+    return {
+        'target_doors': target_doors,
+        'di': di,
+        'reason': 'Авто: только стальные двери и только при наличии квартиры у помещения (параметр/номер квартиры)'
+    }
+
+
+def _prepare_door_geometry(link_inst, link_doc, door, transform, offset_ft):
+    p_link, dir_link = _calc_panel_point_and_dir_link(door, link_doc, offset_ft)
+    if p_link is None:
+        return None
+
+    if dir_link is not None:
+        try:
+            dir_host = transform.OfVector(dir_link)
+        except Exception:
+            dir_host = None
+    else:
+        dir_host = None
+
+    p_host_guess = transform.OfPoint(p_link)
+    p_host_target = p_host_guess
+    face_ref = None
+    p_on_face_link = None
+    _face_n = None
     try:
-        output.print_md('Тип щита (автовыбор): `{0}`'.format(placement_engine.format_family_type(symbol)))
+        link_wall = getattr(door, 'Host', None)
     except Exception:
-        pass
-    output.print_md('Дверей найдено: **{0}** (просканировано={1})'.format(len(target_doors), di))
+        link_wall = None
+    if link_wall is not None:
+        try:
+            face_ref, p_on_face_link, _face_n = _get_linked_wall_face_ref_and_point(link_wall, link_inst, p_link, preferred_normal_xy=dir_link)
+        except Exception:
+            face_ref, p_on_face_link, _face_n = None, None, None
+        if p_on_face_link is not None:
+            try:
+                p_host_target = transform.OfPoint(p_on_face_link)
+            except Exception:
+                p_host_target = p_host_guess
 
+    if dir_host is None and _face_n is not None:
+        try:
+            dir_host = _xy_unit(transform.OfVector(_face_n))
+        except Exception:
+            dir_host = None
+
+    offset_dir_host = dir_host
+    if _face_n is not None:
+        try:
+            offset_dir_host = _xy_unit(transform.OfVector(_face_n))
+        except Exception:
+            offset_dir_host = dir_host
+
+    try:
+        target_bottom_z_host = float(p_host_target.Z) if p_host_target is not None else None
+    except Exception:
+        target_bottom_z_host = None
+
+    return {
+        'p_host_target': p_host_target,
+        'face_ref': face_ref,
+        'dir_host': dir_host,
+        'offset_dir_host': offset_dir_host,
+        'target_bottom_z_host': target_bottom_z_host,
+    }
+
+
+def _place_or_update_panels(link_inst, link_doc, target_doors, symbol, variant_candidate, is_point,
+                            comment_tag, offset_ft, recess_ft, dedupe_mm, dedupe_ft, batch_size, max_place):
     comment_value = '{0}:PANEL_SHK'.format(comment_tag)
     existing_insts = _collect_existing_tagged_instances(doc, comment_value)
     existing_pts = []
@@ -3357,7 +3939,7 @@ def main():
             existing_pts.append(p)
 
     t = link_reader.get_total_transform(link_inst)
-
+    host_levels = _collect_host_levels_sorted(doc)
     created = 0
     updated = 0
     retyped = 0
@@ -3367,11 +3949,9 @@ def main():
     skipped_no_point = 0
     skipped_dedupe = 0
 
-    # Cap placement per run
     if max_place > 0 and len(target_doors) > max_place:
         target_doors = target_doors[:max_place]
 
-    # Batch placement + progress bar
     batch_size = max(batch_size, 1)
     batches = []
     cur = []
@@ -3393,8 +3973,6 @@ def main():
                 break
 
             with tx('ЭОМ: Разместить щиты ШК над входными дверями', doc=doc, swallow_warnings=True):
-                # Ensure TYPE module toggles are applied inside the same transaction as placement.
-                # This avoids cases where a separate transaction for type editing fails silently.
                 if variant_candidate and symbol is not None:
                     try:
                         _apply_panel_variant_params(symbol, variant_candidate)
@@ -3403,59 +3981,17 @@ def main():
                         pass
 
                 for d in batch:
-                    p_link, dir_link = _calc_panel_point_and_dir_link(d, link_doc, offset_ft)
-                    if p_link is None:
+                    geom = _prepare_door_geometry(link_inst, link_doc, d, t, offset_ft)
+                    if geom is None:
                         skipped_no_point += 1
                         continue
 
-                    # Desired facing / outward direction in HOST coords
-                    if dir_link is not None:
-                        try:
-                            dir_host = t.OfVector(dir_link)
-                        except Exception:
-                            dir_host = None
-                    else:
-                        dir_host = None
+                    p_host_target = geom.get('p_host_target')
+                    face_ref = geom.get('face_ref')
+                    dir_host = geom.get('dir_host')
+                    offset_dir_host = geom.get('offset_dir_host')
+                    target_bottom_z_host = geom.get('target_bottom_z_host')
 
-                    # Compute target wall face point (HOST coords) and linked face ref if possible
-                    p_host_guess = t.OfPoint(p_link)
-                    p_host_target = p_host_guess
-                    face_ref = None
-                    p_on_face_link = None
-                    _face_n = None
-                    try:
-                        link_wall = getattr(d, 'Host', None)
-                    except Exception:
-                        link_wall = None
-                    if link_wall is not None:
-                        try:
-                            face_ref, p_on_face_link, _face_n = _get_linked_wall_face_ref_and_point(link_wall, link_inst, p_link, preferred_normal_xy=dir_link)
-                        except Exception:
-                            face_ref, p_on_face_link, _face_n = None, None, None
-                        if p_on_face_link is not None:
-                            try:
-                                p_host_target = t.OfPoint(p_on_face_link)
-                            except Exception:
-                                p_host_target = p_host_guess
-
-                    # If we failed to compute dir_host from door facing, fall back to chosen face normal
-                    if dir_host is None and _face_n is not None:
-                        try:
-                            dir_host = _xy_unit(t.OfVector(_face_n))
-                        except Exception:
-                            dir_host = None
-
-                    # Use selected face normal for wall-offset calculations (recess/protrusion).
-                    # This is critical for hosted families where "Offset from Host" follows face normal,
-                    # which can be opposite to door facing.
-                    offset_dir_host = dir_host
-                    if _face_n is not None:
-                        try:
-                            offset_dir_host = _xy_unit(t.OfVector(_face_n))
-                        except Exception:
-                            offset_dir_host = dir_host
-
-                    # Cleanup duplicates at the same location (keep the 18-module variant if possible)
                     try:
                         cleanup_ft = float(mm_to_ft(50) or 0.0)
                     except Exception:
@@ -3485,13 +4021,11 @@ def main():
                                         continue
                                 except Exception:
                                     pass
-
                                 try:
                                     loc = getattr(e, 'Location', None)
                                     p_old = loc.Point if loc and hasattr(loc, 'Point') else None
                                 except Exception:
                                     p_old = None
-
                                 if p_old is not None and rr > 1e-9:
                                     for i in range(len(existing_pts) - 1, -1, -1):
                                         try:
@@ -3501,7 +4035,6 @@ def main():
                                                 break
                                         except Exception:
                                             continue
-
                                 try:
                                     doc.Delete(e.Id)
                                 except Exception:
@@ -3511,45 +4044,41 @@ def main():
                                 except Exception:
                                     pass
 
-                    # If we already placed a panel at this door on a previous run, update it.
                     existing = _find_near_instance(p_host_target, existing_insts, dedupe_ft) if dedupe_ft > 0 else None
-                    if existing is not None:
-                        # For hosted families we must recreate to change the hosting face reliably
-                        if not is_point:
+                    if existing is not None and (not is_point):
+                        try:
+                            pid = existing.Id
+                        except Exception:
+                            pid = None
+                        try:
+                            loc = getattr(existing, 'Location', None)
+                            p_old = loc.Point if loc and hasattr(loc, 'Point') else None
+                        except Exception:
+                            p_old = None
+                        if p_old is not None:
                             try:
-                                pid = existing.Id
-                            except Exception:
-                                pid = None
-                            # remove old point from dedupe list
-                            try:
-                                loc = getattr(existing, 'Location', None)
-                                p_old = loc.Point if loc and hasattr(loc, 'Point') else None
-                            except Exception:
-                                p_old = None
-                            if p_old is not None:
-                                try:
-                                    rr = float(mm_to_ft(10) or 0.0)
-                                    if rr > 1e-9:
-                                        for i in range(len(existing_pts) - 1, -1, -1):
-                                            try:
-                                                pp = existing_pts[i]
-                                                if pp is not None and float(pp.DistanceTo(p_old)) <= rr:
-                                                    existing_pts.pop(i)
-                                                    break
-                                            except Exception:
-                                                continue
-                                except Exception:
-                                    pass
-                            try:
-                                if pid is not None:
-                                    doc.Delete(pid)
+                                rr = float(mm_to_ft(10) or 0.0)
+                                if rr > 1e-9:
+                                    for i in range(len(existing_pts) - 1, -1, -1):
+                                        try:
+                                            pp = existing_pts[i]
+                                            if pp is not None and float(pp.DistanceTo(p_old)) <= rr:
+                                                existing_pts.pop(i)
+                                                break
+                                        except Exception:
+                                            continue
                             except Exception:
                                 pass
-                            try:
-                                existing_insts.remove(existing)
-                            except Exception:
-                                pass
-                            existing = None
+                        try:
+                            if pid is not None:
+                                doc.Delete(pid)
+                        except Exception:
+                            pass
+                        try:
+                            existing_insts.remove(existing)
+                        except Exception:
+                            pass
+                        existing = None
 
                     if existing is not None:
                         try:
@@ -3559,21 +4088,17 @@ def main():
                                 retyped += 1
                         except Exception:
                             pass
-
                         try:
                             if variant_candidate:
                                 touched_type_ids.add(int(existing.GetTypeId().IntegerValue))
                         except Exception:
                             pass
-
-                        # Enforce module variant on instance (some families use instance parameters)
                         if variant_candidate:
                             try:
                                 _apply_panel_variant_params(existing, variant_candidate)
                             except Exception:
                                 pass
 
-                        # Best-effort facing + protrusion fix
                         final_dir = dir_host
                         try:
                             if dir_host is not None:
@@ -3582,7 +4107,6 @@ def main():
                                         _try_orient_instance_to_dir(doc, existing, p_host_target, dir_host)
                                     except Exception:
                                         pass
-                                # Invert dir_host so panel faces INTO apartment (outward from wall)
                                 flip_dir = DB.XYZ(-dir_host.X, -dir_host.Y, 0.0) if dir_host is not None else None
                                 _try_flip_facing_to_dir(existing, flip_dir, origin_pt=p_host_target)
                                 try:
@@ -3598,6 +4122,16 @@ def main():
                             use_dir = offset_dir_host or dir_host or final_dir
                             if use_dir is not None:
                                 _apply_half_protrusion(doc, existing, use_dir, depth_ft, origin_pt=p_host_target, recess_ft=recess_ft)
+                        except Exception:
+                            pass
+                        try:
+                            if target_bottom_z_host is not None:
+                                _sync_instance_level_and_bottom(
+                                    doc,
+                                    existing,
+                                    target_bottom_z_host,
+                                    host_levels=host_levels
+                                )
                         except Exception:
                             pass
 
@@ -3620,7 +4154,6 @@ def main():
                         p_host = p_host_target
                         inst = placement_engine.place_point_family_instance(doc, symbol, p_host, view=doc.ActiveView)
                     else:
-                        # Face-hosted placement on linked wall face
                         if face_ref is not None and p_host_target is not None:
                             p_host = p_host_target
                             try:
@@ -3639,15 +4172,12 @@ def main():
                             touched_type_ids.add(int(inst.GetTypeId().IntegerValue))
                     except Exception:
                         pass
-
-                    # Enforce module variant on instance (some families use instance parameters)
                     if variant_candidate:
                         try:
                             _apply_panel_variant_params(inst, variant_candidate)
                         except Exception:
                             pass
 
-                    # Align + facing (point-based rotation + hosted FlipFacing)
                     final_dir = dir_host
                     if dir_host is not None and p_host is not None:
                         try:
@@ -3656,7 +4186,6 @@ def main():
                         except Exception:
                             pass
                         try:
-                            # Invert dir_host so panel faces INTO apartment (outward from wall)
                             flip_dir = DB.XYZ(-dir_host.X, -dir_host.Y, 0.0) if dir_host is not None else None
                             _try_flip_facing_to_dir(inst, flip_dir, origin_pt=p_host)
                         except Exception:
@@ -3667,12 +4196,21 @@ def main():
                         except Exception:
                             final_dir = dir_host
 
-                    # Protrusion fix: keep panel from ending up inside the wall
                     try:
                         depth_ft = _try_get_depth_ft(symbol, inst)
                         use_dir = offset_dir_host or dir_host or final_dir
                         if use_dir is not None and p_host is not None:
                             _apply_half_protrusion(doc, inst, use_dir, depth_ft, origin_pt=p_host, recess_ft=recess_ft)
+                    except Exception:
+                        pass
+                    try:
+                        if target_bottom_z_host is not None:
+                            _sync_instance_level_and_bottom(
+                                doc,
+                                inst,
+                                target_bottom_z_host,
+                                host_levels=host_levels
+                            )
                     except Exception:
                         pass
 
@@ -3688,7 +4226,6 @@ def main():
                         pass
 
                     set_comments(inst, comment_value)
-
                     aptnum = _try_get_apartment_number(d, link_doc)
                     if aptnum:
                         set_mark(inst, 'APT-{0}-SHK'.format(aptnum))
@@ -3700,6 +4237,35 @@ def main():
                     except Exception:
                         pass
                     created += 1
+
+    return {
+        'created': created,
+        'updated': updated,
+        'retyped': retyped,
+        'skipped_dedupe': skipped_dedupe,
+        'skipped_no_point': skipped_no_point,
+        'comment_value': comment_value,
+        'created_ids': created_ids,
+        'first_created_id': first_created_id,
+        'touched_type_ids': touched_type_ids,
+        'dedupe_mm': dedupe_mm,
+        'variant_candidate': variant_candidate,
+    }
+
+
+def _report_and_finalize(symbol, placement):
+    created = placement.get('created', 0)
+    updated = placement.get('updated', 0)
+    retyped = placement.get('retyped', 0)
+    skipped_dedupe = placement.get('skipped_dedupe', 0)
+    skipped_no_point = placement.get('skipped_no_point', 0)
+    comment_value = placement.get('comment_value', '')
+    created_ids = placement.get('created_ids', [])
+    first_created_id = placement.get('first_created_id')
+    touched_type_ids = placement.get('touched_type_ids', set())
+    dedupe_mm = placement.get('dedupe_mm', 0)
+    variant_candidate = placement.get('variant_candidate', '')
+    is_forced = bool(getattr(magic_context, 'FORCE_SELECTION', False))
 
     output.print_md('---')
     output.print_md('Создано щитов: **{0}**'.format(created))
@@ -3715,8 +4281,7 @@ def main():
 
     report_time_saved(output, 'panels_shk_apartment')
 
-    # Debug: open a 3D view zoomed to placed panels
-    if created_ids:
+    if created_ids and (not is_forced):
         try:
             go3d = forms.alert(
                 'Открыть отладочный 3D-вид и приблизить к размещённым щитам ШК?',
@@ -3747,8 +4312,6 @@ def main():
                             v3d.DisplayStyle = DB.DisplayStyle.Shading
                         except Exception:
                             pass
-
-                        # Show links and electrical equipment
                         try:
                             cat_links = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_RvtLinks)
                             if cat_links:
@@ -3761,7 +4324,6 @@ def main():
                                 v3d.SetCategoryHidden(cat_eq.Id, False)
                         except Exception:
                             pass
-
                         try:
                             v3d.IsSectionBoxActive = True
                         except Exception:
@@ -3776,8 +4338,6 @@ def main():
                         uidoc.RequestViewChange(v3d)
                     except Exception:
                         pass
-
-                    # Select + zoom to first placed element
                     try:
                         av = uidoc.ActiveView
                         if av:
@@ -3786,7 +4346,6 @@ def main():
                                     av.DisableTemporaryViewMode(DB.TemporaryViewMode.TemporaryHideIsolate)
                             except Exception:
                                 pass
-
                         try:
                             sel_ids = _as_net_id_list(created_ids[:50])
                             if sel_ids is not None:
@@ -3819,9 +4378,9 @@ def main():
             'time_saved_minutes_max': minutes_max,
             'placed': created,
         }
-    except: pass
+    except:
+        pass
 
-    # Post-fix again after placement batches (some families re-evaluate visibility during placement)
     if variant_candidate:
         try:
             type_ids = set(touched_type_ids or [])
@@ -3853,6 +4412,97 @@ def main():
                             pass
             except Exception:
                 pass
+
+
+def main():
+    if (not bool(getattr(magic_context, 'FORCE_SELECTION', False))
+            and not bool(getattr(magic_context, 'IS_RUNNING', False))):
+        pairs = link_reader.select_link_level_pairs(
+            doc,
+            link_title=u'Выберите связь(и) АР',
+            level_title=u'Выберите этажи',
+            default_all_links=True,
+            default_all_levels=True,
+            loaded_only=True
+        )
+        if not pairs:
+            output.print_md('**Отменено (связи/уровни не выбраны).**')
+            return 0
+
+        total_created = 0
+        old_force = bool(getattr(magic_context, 'FORCE_SELECTION', False))
+        old_link = getattr(magic_context, 'SELECTED_LINK', None)
+        old_links = list(getattr(magic_context, 'SELECTED_LINKS', []) or [])
+        old_levels = list(getattr(magic_context, 'SELECTED_LEVELS', []) or [])
+        try:
+            for pair in pairs:
+                link_inst = pair.get('link_instance')
+                levels = list(pair.get('levels') or [])
+                if link_inst is None or not levels:
+                    continue
+
+                try:
+                    link_name = link_inst.Name
+                except Exception:
+                    link_name = u'<Связь>'
+                output.print_md(u'## Обработка связи: `{0}`'.format(link_name))
+
+                magic_context.FORCE_SELECTION = True
+                magic_context.SELECTED_LINK = link_inst
+                magic_context.SELECTED_LINKS = [link_inst]
+                magic_context.SELECTED_LEVELS = levels
+
+                total_created += int(main() or 0)
+        finally:
+            magic_context.FORCE_SELECTION = old_force
+            magic_context.SELECTED_LINK = old_link
+            magic_context.SELECTED_LINKS = old_links
+            magic_context.SELECTED_LEVELS = old_levels
+
+        output.print_md('---')
+        output.print_md('Итог по выбранным связям: **{0}** щитов ШК'.format(total_created))
+        return total_created
+
+    output.print_md('# Размещение щитов ШК над входной дверью квартиры')
+    output.print_md('Документ (ЭОМ): `{0}`'.format(doc.Title))
+
+    ctx = _prepare_context_and_config()
+    if ctx is None:
+        return
+
+    sym = _prepare_symbol_and_variant(ctx.get('fam_fullname'), ctx.get('variant_param_name'))
+    if sym is None:
+        return
+
+    doors = _select_target_doors(
+        ctx.get('link_doc'),
+        ctx.get('link_inst'),
+        ctx.get('scan_limit_doors'),
+        selected_level_ids=ctx.get('selected_level_ids'),
+        selected_levels_meta=ctx.get('selected_levels_meta')
+    )
+    if doors is None:
+        return
+
+    output.print_md('Режим выбора дверей: **{0}**'.format(doors.get('reason')))
+    try:
+        output.print_md('Тип щита (автовыбор): `{0}`'.format(placement_engine.format_family_type(sym.get('symbol'))))
+    except Exception:
+        pass
+    output.print_md('Дверей найдено: **{0}** (просканировано={1})'.format(len(doors.get('target_doors') or []), doors.get('di') or 0))
+
+    placement = _place_or_update_panels(
+        ctx.get('link_inst'), ctx.get('link_doc'), doors.get('target_doors') or [],
+        sym.get('symbol'), sym.get('variant_candidate'), sym.get('is_point'),
+        ctx.get('comment_tag'), ctx.get('offset_ft'), ctx.get('recess_ft'),
+        ctx.get('dedupe_mm'), ctx.get('dedupe_ft'), ctx.get('batch_size'), ctx.get('max_place')
+    )
+
+    _report_and_finalize(sym.get('symbol'), placement)
+    try:
+        return int(placement.get('created', 0) or 0)
+    except Exception:
+        return 0
 
 
 try:

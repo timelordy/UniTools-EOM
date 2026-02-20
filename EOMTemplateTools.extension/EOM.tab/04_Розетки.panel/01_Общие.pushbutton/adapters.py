@@ -78,8 +78,18 @@ def get_total_transform(link_inst):
     return link_reader.get_total_transform(link_inst)
 
 
-def place_socket_batch(doc, link_inst, transform, pending, sym_flags, sp_cache, comment_value, strict_hosting):
-    return su._place_socket_batch(doc, link_inst, transform, pending, sym_flags, sp_cache, comment_value, strict_hosting=strict_hosting)
+def place_socket_batch(doc, link_inst, transform, pending, sym_flags, sp_cache, comment_value, strict_hosting, wall_search_ft=None):
+    return su._place_socket_batch(
+        doc,
+        link_inst,
+        transform,
+        pending,
+        sym_flags,
+        sp_cache,
+        comment_value,
+        strict_hosting=strict_hosting,
+        wall_search_ft=wall_search_ft,
+    )
 
 
 def create_progress_bar(title, max_value):

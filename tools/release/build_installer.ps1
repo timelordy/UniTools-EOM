@@ -1,7 +1,7 @@
 # Build an offline-ish Windows EXE installer for EOMTemplateTools.
 #
 # Output:
-#   dist/release/<Version>/EOMTemplateTools_Setup_<Version>.exe
+#   dist/release/<Version>/UniTools - EOM Setup <Version>.exe
 #   dist/release/<Version>/EOMTemplateTools.extension.zip
 #   dist/release/<Version>/pyRevitSetup.exe
 
@@ -20,6 +20,143 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $repoRoot
 Set-Location $repoRoot
 
+function Set-ExecutableIconFromIco {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExePath,
+        [Parameter(Mandatory = $true)]
+        [string]$IcoPath,
+        [UInt16]$GroupIconId = 1,
+        [UInt16]$LanguageId = 0
+    )
+
+    if (-not (Test-Path $ExePath)) {
+        throw "Executable not found: $ExePath"
+    }
+    if (-not (Test-Path $IcoPath)) {
+        throw "ICO file not found: $IcoPath"
+    }
+
+    if (-not ('Win32IconResourceUpdater' -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class Win32IconResourceUpdater {
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr BeginUpdateResource(string pFileName, bool bDeleteExistingResources);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool UpdateResource(
+        IntPtr hUpdate,
+        IntPtr lpType,
+        IntPtr lpName,
+        ushort wLanguage,
+        byte[] lpData,
+        uint cbData
+    );
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool EndUpdateResource(IntPtr hUpdate, bool fDiscard);
+}
+"@ -Language CSharp
+    }
+
+    $icoBytes = [System.IO.File]::ReadAllBytes($IcoPath)
+    $icoStream = New-Object System.IO.MemoryStream(, $icoBytes)
+    $reader = New-Object System.IO.BinaryReader($icoStream)
+
+    $reserved = $reader.ReadUInt16()
+    $icoType = $reader.ReadUInt16()
+    $count = $reader.ReadUInt16()
+
+    if ($reserved -ne 0 -or $icoType -ne 1 -or $count -le 0) {
+        throw "Invalid ICO format: $IcoPath"
+    }
+
+    $entries = @()
+    for ($i = 0; $i -lt $count; $i++) {
+        $entries += [PSCustomObject]@{
+            Width = $reader.ReadByte()
+            Height = $reader.ReadByte()
+            ColorCount = $reader.ReadByte()
+            Reserved = $reader.ReadByte()
+            Planes = $reader.ReadUInt16()
+            BitCount = $reader.ReadUInt16()
+            BytesInRes = $reader.ReadUInt32()
+            ImageOffset = $reader.ReadUInt32()
+            IconId = [UInt16]($i + 1)
+        }
+    }
+
+    $hUpdate = [Win32IconResourceUpdater]::BeginUpdateResource($ExePath, $false)
+    if ($hUpdate -eq [IntPtr]::Zero) {
+        $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw "BeginUpdateResource failed (Win32=$code): $ExePath"
+    }
+
+    $success = $false
+    try {
+        foreach ($entry in $entries) {
+            $icoStream.Position = $entry.ImageOffset
+            $imgBytes = $reader.ReadBytes([int]$entry.BytesInRes)
+            $ok = [Win32IconResourceUpdater]::UpdateResource(
+                $hUpdate,
+                [IntPtr]3,                # RT_ICON
+                [IntPtr]([int]$entry.IconId),
+                $LanguageId,
+                $imgBytes,
+                [uint32]$imgBytes.Length
+            )
+            if (-not $ok) {
+                $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                throw "UpdateResource(RT_ICON) failed (Win32=$code, id=$($entry.IconId))"
+            }
+        }
+
+        $groupStream = New-Object System.IO.MemoryStream
+        $groupWriter = New-Object System.IO.BinaryWriter($groupStream)
+        $groupWriter.Write([UInt16]0)           # Reserved
+        $groupWriter.Write([UInt16]1)           # Type (icon)
+        $groupWriter.Write([UInt16]$count)      # Count
+        foreach ($entry in $entries) {
+            $groupWriter.Write([byte]$entry.Width)
+            $groupWriter.Write([byte]$entry.Height)
+            $groupWriter.Write([byte]$entry.ColorCount)
+            $groupWriter.Write([byte]$entry.Reserved)
+            $groupWriter.Write([UInt16]$entry.Planes)
+            $groupWriter.Write([UInt16]$entry.BitCount)
+            $groupWriter.Write([UInt32]$entry.BytesInRes)
+            $groupWriter.Write([UInt16]$entry.IconId)  # Resource ID in RT_ICON
+        }
+
+        $groupBytes = $groupStream.ToArray()
+        $okGroup = [Win32IconResourceUpdater]::UpdateResource(
+            $hUpdate,
+            [IntPtr]14,               # RT_GROUP_ICON
+            [IntPtr]([int]$GroupIconId),
+            $LanguageId,
+            $groupBytes,
+            [uint32]$groupBytes.Length
+        )
+        if (-not $okGroup) {
+            $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw "UpdateResource(RT_GROUP_ICON) failed (Win32=$code, id=$GroupIconId)"
+        }
+
+        $success = $true
+    }
+    finally {
+        try {
+            [void][Win32IconResourceUpdater]::EndUpdateResource($hUpdate, (-not $success))
+        } finally {
+            try { $reader.Close() } catch {}
+            try { $icoStream.Close() } catch {}
+        }
+    }
+}
+
 function Get-ProjectVersion {
     param([string]$PyProjectPath)
 
@@ -36,7 +173,7 @@ function Get-ProjectVersion {
 }
 
 function Get-LatestPyRevitInstallerUrl {
-    $api = 'https://api.github.com/repos/eirannejad/pyRevit/releases/latest'
+    $api = 'https://api.github.com/repos/pyrevitlabs/pyRevit/releases/latest'
     $headers = @{ 'User-Agent' = 'EOMTemplateTools-ReleaseScript' }
     $release = Invoke-RestMethod -Uri $api -Headers $headers
 
@@ -49,15 +186,30 @@ function Get-LatestPyRevitInstallerUrl {
         throw 'pyRevit latest release has no .exe assets'
     }
 
-    # Prefer typical installer naming, otherwise pick the largest .exe.
-    $preferred = @(
-        $exeAssets | Where-Object { $_.name -match 'setup|installer|install' }
+    # Never pick admin installers: target is per-user setup without elevation.
+    $nonAdmin = @(
+        $exeAssets | Where-Object { $_.name -notmatch '(?i)admin' }
     )
-    if ($preferred.Count -gt 0) {
-        return ($preferred | Sort-Object size -Descending | Select-Object -First 1).browser_download_url
+    if ($nonAdmin.Count -eq 0) {
+        throw 'pyRevit latest release has only admin installers; cannot build non-admin package'
     }
 
-    return ($exeAssets | Sort-Object size -Descending | Select-Object -First 1).browser_download_url
+    # Prefer full pyRevit installer (not CLI-only), then fallback to any non-admin exe.
+    $preferred = @(
+        $nonAdmin | Where-Object { $_.name -match '(?i)^pyrevit_(?!cli_).+\.exe$' }
+    )
+    if ($preferred.Count -eq 0) {
+        $preferred = @(
+            $nonAdmin | Where-Object { $_.name -notmatch '(?i)cli' }
+        )
+    }
+    if ($preferred.Count -eq 0) {
+        $preferred = $nonAdmin
+    }
+
+    $selected = $preferred | Sort-Object size -Descending | Select-Object -First 1
+    Write-Host ("Selected pyRevit installer asset: {0}" -f $selected.name) -ForegroundColor Gray
+    return $selected.browser_download_url
 }
 
 if (-not $Version) {
@@ -116,7 +268,7 @@ Copy-Item -Path (Join-Path $repoRoot 'tools\release\payload\install.cmd') -Desti
 Copy-Item -Path $extZip -Destination (Join-Path $payloadDir 'EOMTemplateTools.extension.zip') -Force
 Copy-Item -Path $pyRevitOut -Destination (Join-Path $payloadDir 'pyRevitSetup.exe') -Force
 
-$installerExe = Join-Path $releaseDir ("EOMTemplateTools_Setup_{0}.exe" -f $Version)
+$installerExe = Join-Path $releaseDir ("UniTools - EOM Setup {0}.exe" -f $Version)
 $sedPath = Join-Path $stagingDir 'installer.sed'
 
 $sed = @()
@@ -147,7 +299,7 @@ $sed += 'InstallPrompt='
 $sed += 'DisplayLicense='
 $sed += 'FinishMessage='
 $sed += ('TargetName={0}' -f $installerExe)
-$sed += ('FriendlyName=EOMTemplateTools Installer {0}' -f $Version)
+$sed += ('FriendlyName=UniTools - EOM Installer {0}' -f $Version)
 $sed += 'AppLaunched=install.cmd'
 $sed += 'PostInstallCmd=<None>'
 $sed += 'AdminQuietInstCmd=install.cmd'
@@ -196,6 +348,19 @@ if (-not (Test-Path $installerExe)) {
     Write-Host 'Artifacts near releaseDir:' -ForegroundColor Yellow
     Get-ChildItem -Force $releaseDir | Select-Object Name,Length,LastWriteTime | Format-Table -AutoSize | Out-String | Write-Host
     throw "Installer build failed: $installerExe not found"
+}
+
+$hubInstallerIcon = Join-Path $repoRoot 'EOMHub\web\icons\icon.ico'
+if (Test-Path $hubInstallerIcon) {
+    Write-Host "Applying Hub icon to installer..." -ForegroundColor Yellow
+    try {
+        Set-ExecutableIconFromIco -ExePath $installerExe -IcoPath $hubInstallerIcon
+        Write-Host "Installer icon updated from: $hubInstallerIcon" -ForegroundColor Green
+    } catch {
+        Write-Host "WARNING: Failed to apply installer icon: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "WARNING: Hub icon not found, skipping installer icon patch: $hubInstallerIcon" -ForegroundColor Yellow
 }
 
 Write-Host '=====================================' -ForegroundColor Cyan

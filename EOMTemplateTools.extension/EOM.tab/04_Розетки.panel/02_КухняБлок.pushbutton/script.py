@@ -11,19 +11,89 @@ try:
 except Exception:
     pass
 
+try:
+    tool_dir = os.path.dirname(os.path.abspath(__file__))
+    if tool_dir in sys.path:
+        sys.path.remove(tool_dir)
+    sys.path.insert(0, tool_dir)
+except Exception:
+    pass
+
+# Reset local modules cached from other socket commands in shared IronPython engine.
+def _clear_local_modules():
+    local_module_names = (
+        'orchestrator',
+        'adapters',
+        'constants',
+        'domain',
+        'logic',
+        'placement_engine',
+        'config_loader',
+        'validator',
+    )
+    for module_name in local_module_names:
+        try:
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+        except Exception:
+            pass
+
+_clear_local_modules()
+
 from pyrevit import revit, script
 from utils_revit import log_exception
 from time_savings import report_time_saved, calculate_time_saved, calculate_time_saved_range
+import link_reader
+import magic_context
 import orchestrator
 
 def main():
     doc = revit.doc
     output = script.get_output()
+    pairs = link_reader.select_link_level_pairs(
+        doc,
+        link_title=u'Выберите связь(и) АР',
+        level_title=u'Выберите уровни для обработки',
+        default_all_links=True,
+        default_all_levels=True,
+        loaded_only=True
+    )
+    if not pairs:
+        output.print_md('**Отменено (связи/уровни не выбраны).**')
+        return
+
+    created = 0
+    old_force = bool(getattr(magic_context, 'FORCE_SELECTION', False))
+    old_link = getattr(magic_context, 'SELECTED_LINK', None)
+    old_links = list(getattr(magic_context, 'SELECTED_LINKS', []) or [])
+    old_levels = list(getattr(magic_context, 'SELECTED_LEVELS', []) or [])
     try:
-        created = orchestrator.run(doc, output)
-    except Exception:
-        log_exception('Error in 02_Kitchen_Unit')
-        created = 0
+        for pair in pairs:
+            link_inst = pair.get('link_instance')
+            levels = list(pair.get('levels') or [])
+            if link_inst is None or not levels:
+                continue
+
+            try:
+                link_name = link_inst.Name
+            except Exception:
+                link_name = u'<Связь>'
+            output.print_md(u'## Обработка связи: `{0}`'.format(link_name))
+
+            magic_context.FORCE_SELECTION = True
+            magic_context.SELECTED_LINK = link_inst
+            magic_context.SELECTED_LINKS = [link_inst]
+            magic_context.SELECTED_LEVELS = levels
+
+            try:
+                created += int(orchestrator.run(doc, output) or 0)
+            except Exception:
+                log_exception('Error in 02_Kitchen_Unit')
+    finally:
+        magic_context.FORCE_SELECTION = old_force
+        magic_context.SELECTED_LINK = old_link
+        magic_context.SELECTED_LINKS = old_links
+        magic_context.SELECTED_LEVELS = old_levels
 
     try:
         created = int(created or 0)
@@ -54,4 +124,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -336,6 +336,15 @@ def _get_tools_config() -> dict:
           "time_saved": 30,
           "script_path": "03_ЩитыВыключатели.panel/ВыключателиУДверей.pushbutton/script.py"
         },
+        "floor_panel_niches": {
+          "id": "floor_panel_niches",
+          "name": "ЩЭВНишах",
+          "icon": "/icons/floor_panel_niches.png",
+          "description": "Размещение этажных щитов в нишах",
+          "category": "panels",
+          "time_saved": 15,
+          "script_path": "03_ЩитыВыключатели.panel/ЩЭВНишах.pushbutton/script.py"
+        },
         "sockets_general": {
           "id": "sockets_general",
           "name": "Общие розетки",
@@ -356,12 +365,12 @@ def _get_tools_config() -> dict:
         },
         "wet_zones": {
           "id": "wet_zones",
-          "name": "Мокрые зоны",
+          "name": "Мокрые точки",
           "icon": "/icons/wet_zones.png",
           "description": "Розетки в санузлах (стиральные и пр.)",
           "category": "sockets",
           "time_saved": 10,
-          "script_path": "04_Розетки.panel/05_ВлажныеЗоны.pushbutton/script.py"
+          "script_path": "04_Розетки.panel/05_МокрыеТочки.pushbutton/script.py"
         },
         "low_voltage": {
           "id": "low_voltage",

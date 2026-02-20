@@ -168,13 +168,17 @@
                                                             "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
                                                             "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
                                                         ],
-                              "light_lift_shaft":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "light_lift_shaft":  [
+                                                       "(LF)_RSC PROM настенный : RSC PROM 18-2100LM [OneLevelBased]",
+                                                       "(LF)_RSC PROM настенный : RSC PROM 18-2100LM",
+                                                       "(LF)_RSC PROM настенный"
+                                                   ],
                               "pk_indicator":  "TSL_SHM_УГО_ПК",
                               "socket_low_voltage":  [
                                                          "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
                                                          "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
                                                      ],
-                              "light_ceiling_terminal":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "light_ceiling_terminal":  "(FL)_Патрон Е27НК.rfa",
                               "socket_intercom":  [
                                                       "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
                                                       "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
@@ -190,11 +194,11 @@
                               "socket_kitchen_general":  [
                                                              "TSL_EF_t_CT_b_IP20_P3t_1P+N+PE"
                                                          ],
-                              "light_wall_bath":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "light_wall_bath":  "(FL)_НПБ_1101.rfa",
                               "switch_1g":  [
                                                 "TSL_LD_т_СТ_в_IP20_Вкл_1P_1кл"
                                             ],
-                              "light_wall_wc":  "TSL_LF_э_ПЛ_Патрон (нагрузка)",
+                              "light_wall_wc":  "KNS_Trubi_RVT_RFA.zip.rfa",
                               "socket_router":  [
                                                     "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE",
                                                     "TSL_EF_т_СТ_в_IP20_Рзт_1P+N+PE_2п"
@@ -334,8 +338,6 @@
     "light_terminal_room_name_patterns":  [
                                               "спальн",
                                               "гостин",
-                                              "комнат",
-                                              "жил",
                                               "living",
                                               "bedroom"
                                           ],
@@ -343,6 +345,7 @@
     "kitchen_total_sockets":  4,
     "ac_facade_dir_hint_min_align":  0.5,
     "door_head_height_mm":  2100,
+    "wall_embed_mm":  30,
     "host_wall_search_mm":  1000,
     "ac_basket_bbox_z_tol_mm":  1500,
     "wet_room_name_patterns":  [
@@ -436,12 +439,47 @@
     "ac_basket_merge_mm":  200,
     "wet_bath_clear_mm":  600,
     "socket_spacing_mm":  3000,
+    "socket_general_spacing_mm":  3000,
+    "socket_general_require_wall_hosting":  true,
+    "socket_general_skip_facade_walls":  false,
+    "socket_general_skip_exterior_walls":  true,
+    "socket_general_exterior_by_boundary_geometry":  true,
+    "socket_general_exterior_requires_openings":  true,
+    "socket_general_exterior_min_segment_mm":  500,
+    "socket_general_skip_monolith_walls":  true,
+    "socket_general_skip_structural_walls":  true,
+    "socket_general_facade_wall_name_patterns":  [
+                                                     "фасад",
+                                                     "нр_",
+                                                     "nr_",
+                                                     "facade"
+                                                 ],
+    "socket_general_exterior_wall_name_patterns":  [
+                                                       "наруж",
+                                                       "внеш",
+                                                       "фасад",
+                                                       "нр_",
+                                                       "nr_",
+                                                       "exterior",
+                                                       "outside",
+                                                       "facade"
+                                                   ],
+    "socket_general_monolith_wall_name_patterns":  [
+                                                       "кж",
+                                                       "монолит",
+                                                       "монол",
+                                                       "железобет",
+                                                       "жб",
+                                                       "бетон",
+                                                       "concrete",
+                                                       "struct"
+                                                   ],
     "wet_show_screens_limit":  0,
     "wet_wm_shift_away_from_door_mm":  300,
     "panel_recess_mm":  40,
     "low_voltage_router_height_mm":  300,
     "kitchen_fridge_max_dist_mm":  1500,
-    "panel_above_door_offset_mm":  300,
+    "panel_above_door_offset_mm":  100,
     "lift_shaft_room_exclude_patterns":  [
                                              "машин",
                                              "machine"

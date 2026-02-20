@@ -25,12 +25,18 @@ def run(doc, output):
     comment_tag = rules.get('comment_tag', constants.COMMENT_TAG_DEFAULT)
     comment_value = '{0}{1}'.format(comment_tag, constants.COMMENT_SUFFIX)
 
-    spacing_mm = float(rules.get('socket_spacing_mm', constants.DEFAULT_SPACING_MM))
+    spacing_mm = float(
+        rules.get(
+            'socket_general_spacing_mm',
+            rules.get('socket_spacing_mm', constants.DEFAULT_SPACING_MM),
+        )
+    )
     height_mm = float(rules.get('socket_height_mm', constants.DEFAULT_HEIGHT_MM))
     avoid_door_mm = float(rules.get('avoid_door_mm', constants.AVOID_DOOR_MM))
     avoid_radiator_mm = float(rules.get('avoid_radiator_mm', constants.AVOID_RADIATOR_MM))
     dedupe_mm = float(rules.get('socket_dedupe_radius_mm', constants.DEDUPE_MM))
     batch_size = int(rules.get('batch_size', constants.BATCH_SIZE) or constants.BATCH_SIZE)
+    host_wall_search_mm = float(rules.get('host_wall_search_mm', constants.HOST_WALL_SEARCH_MM) or constants.HOST_WALL_SEARCH_MM)
 
     opening_offset_mm = avoid_door_mm
     try:
@@ -62,6 +68,8 @@ def run(doc, output):
     dedupe_ft = mm_to_ft(dedupe_mm)
     window_offset_ft = avoid_door_ft
     corner_offset_ft = avoid_door_ft
+    host_wall_search_ft = mm_to_ft(host_wall_search_mm)
+    wall_filter = domain.build_wall_filter(rules)
 
     cfg = adapters.get_config()
     fams = rules.get('family_type_names', {})
@@ -174,9 +182,12 @@ def run(doc, output):
     is_wp = (pt_enum == DB.FamilyPlacementType.WorkPlaneBased)
     is_ol = (pt_enum == DB.FamilyPlacementType.OneLevelBased)
     sym_flags[sid] = (is_wp, is_ol)
-    strict_hosting_mode = not is_ol
+    strict_hosting_mode = bool(rules.get('socket_general_require_wall_hosting', constants.DEFAULT_REQUIRE_WALL_HOSTING))
     if is_ol:
-        output.print_md(u'**Внимание:** тип розетки OneLevelBased — размещение будет без хоста.')
+        if strict_hosting_mode:
+            output.print_md(u'**Внимание:** тип розетки OneLevelBased — включена строгая проверка привязки к стене.')
+        else:
+            output.print_md(u'**Внимание:** тип розетки OneLevelBased — размещение будет без хоста.')
 
     sp_cache = {}
     pending = []
@@ -199,6 +210,7 @@ def run(doc, output):
                 openings_cache,
                 window_offset_ft=window_offset_ft,
                 corner_offset_ft=corner_offset_ft,
+                wall_filter=wall_filter,
             )
 
             if effective_len_ft <= 1e-6: continue
@@ -230,6 +242,7 @@ def run(doc, output):
                 )
             else:
                 count_len_ft = effective_len_ft
+                count_breakdown = domain.new_general_breakdown()
                 try:
                     _, count_len_ft = domain.calculate_allowed_path(
                         link_doc,
@@ -239,11 +252,14 @@ def run(doc, output):
                         openings_cache,
                         window_offset_ft=0.0,
                         corner_offset_ft=0.0,
+                        wall_filter=wall_filter,
+                        breakdown=count_breakdown,
                     )
                 except Exception:
                     count_len_ft = effective_len_ft
+                    count_breakdown = None
 
-                num, step_ft = domain.calc_general_socket_count_and_step_for_lengths(
+                num, _ = domain.calc_general_socket_count_and_step_for_lengths(
                     count_len_ft,
                     effective_len_ft,
                     spacing_ft,
@@ -253,14 +269,7 @@ def run(doc, output):
                     effective_len_ft,
                     num,
                 )
-                summary = domain.format_room_socket_summary(
-                    txt_r,
-                    count_len_ft,
-                    num,
-                    step_ft,
-                    is_hallway=False,
-                    room_area_sqm=None,
-                )
+                summary = domain.format_room_socket_breakdown(txt_r, count_breakdown, spacing_ft, num)
 
             if summary:
                 output.print_md(summary)
@@ -287,15 +296,33 @@ def run(doc, output):
                 pending.append((w, p_link, v, sym_gen, 0.0))
 
                 if len(pending) >= batch_size:
-                    c0, _, _, _, _, _, _ = adapters.place_socket_batch(doc, link_inst, t, pending, sym_flags, sp_cache, comment_value, strict_hosting=strict_hosting_mode)
+                    c0, _, _, _, _, _, _ = adapters.place_socket_batch(
+                        doc,
+                        link_inst,
+                        t,
+                        pending,
+                        sym_flags,
+                        sp_cache,
+                        comment_value,
+                        strict_hosting=strict_hosting_mode,
+                        wall_search_ft=host_wall_search_ft,
+                    )
                     created += c0
                     pending = []
 
     if pending:
-        c0, _, _, _, _, _, _ = adapters.place_socket_batch(doc, link_inst, t, pending, sym_flags, sp_cache, comment_value, strict_hosting=strict_hosting_mode)
+        c0, _, _, _, _, _, _ = adapters.place_socket_batch(
+            doc,
+            link_inst,
+            t,
+            pending,
+            sym_flags,
+            sp_cache,
+            comment_value,
+            strict_hosting=strict_hosting_mode,
+            wall_search_ft=host_wall_search_ft,
+        )
         created += c0
 
     output.print_md(u'Готово. Создано розеток: **{0}**'.format(created))
     return created
-
-

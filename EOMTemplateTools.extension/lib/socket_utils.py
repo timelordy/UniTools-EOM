@@ -359,8 +359,199 @@ def _get_opening_width_ft(inst, primary_bip=None, fallback_width_mm=None):
     if fallback_width_mm: return float(mm_to_ft(fallback_width_mm) or 0.0)
     return None
 
+def _is_wall_element(elem):
+    if elem is None:
+        return False
+    try:
+        if isinstance(elem, DB.Wall):
+            return True
+    except Exception:
+        pass
+    try:
+        cat = getattr(elem, 'Category', None)
+        if cat and int(cat.Id.IntegerValue) == int(DB.BuiltInCategory.OST_Walls):
+            return True
+    except Exception:
+        pass
+    try:
+        if hasattr(elem, 'WallType'):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _wall_match_text(wall):
+    if wall is None:
+        return u''
+    parts = []
+    try:
+        parts.append(getattr(wall, 'Name', u'') or u'')
+    except Exception:
+        pass
+    try:
+        wt = getattr(wall, 'WallType', None)
+    except Exception:
+        wt = None
+    if wt is not None:
+        try:
+            parts.append(getattr(wt, 'Name', u'') or u'')
+        except Exception:
+            pass
+        try:
+            parts.append(getattr(wt, 'FamilyName', u'') or u'')
+        except Exception:
+            pass
+    try:
+        txt = _elem_text(wall)
+        if txt:
+            parts.append(txt)
+    except Exception:
+        pass
+    return _norm(u' '.join([p for p in parts if p]))
+
+
+def _param_to_text(param):
+    if param is None:
+        return u''
+    for getter in ('AsValueString', 'AsString'):
+        try:
+            fn = getattr(param, getter, None)
+            if fn is None:
+                continue
+            v = fn()
+            if v:
+                return _norm(v)
+        except Exception:
+            continue
+    return u''
+
+
+def _is_exterior_wall(wall, patterns_rx=None):
+    if not _is_wall_element(wall):
+        return False
+
+    try:
+        wt = getattr(wall, 'WallType', None)
+    except Exception:
+        wt = None
+
+    try:
+        fn = getattr(wt, 'Function', None) if wt is not None else None
+        if fn is not None:
+            txt = _norm(str(fn))
+            if ('exterior' in txt) or (u'наруж' in txt):
+                return True
+            try:
+                if int(fn) == 1:
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    bip_names = ('WALL_ATTR_FUNCTION_PARAM', 'FUNCTION_PARAM')
+    for owner in (wall, wt):
+        if owner is None:
+            continue
+        for bip_name in bip_names:
+            try:
+                bip = getattr(DB.BuiltInParameter, bip_name, None)
+            except Exception:
+                bip = None
+            if bip is None:
+                continue
+            try:
+                p = owner.get_Parameter(bip)
+            except Exception:
+                p = None
+            if p is None:
+                continue
+            try:
+                if p.StorageType == DB.StorageType.Integer and int(p.AsInteger()) == 1:
+                    return True
+            except Exception:
+                try:
+                    if int(p.AsInteger()) == 1:
+                        return True
+                except Exception:
+                    pass
+            txt = _param_to_text(p)
+            if txt and (('exterior' in txt) or (u'наруж' in txt)):
+                return True
+
+    if patterns_rx:
+        try:
+            txt = _wall_match_text(wall)
+            if _match_any(patterns_rx, txt):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _is_facade_wall(wall, patterns_rx=None):
+    if not _is_wall_element(wall):
+        return False
+    if not patterns_rx:
+        return False
+    try:
+        txt = _wall_match_text(wall)
+        return bool(_match_any(patterns_rx, txt))
+    except Exception:
+        return False
+
+
+def _is_structural_wall(wall):
+    if not _is_wall_element(wall):
+        return False
+
+    try:
+        bip = getattr(DB.BuiltInParameter, 'WALL_STRUCTURAL_SIGNIFICANT', None)
+    except Exception:
+        bip = None
+    if bip is not None:
+        for owner in (wall, getattr(wall, 'WallType', None)):
+            if owner is None:
+                continue
+            try:
+                p = owner.get_Parameter(bip)
+            except Exception:
+                p = None
+            if p is None:
+                continue
+            try:
+                if int(p.AsInteger()) == 1:
+                    return True
+            except Exception:
+                continue
+
+    try:
+        usage = getattr(wall, 'StructuralUsage', None)
+        if usage is not None:
+            txt = _norm(str(usage))
+            if txt and ('nonbearing' not in txt) and (u'ненесущ' not in txt) and (txt not in ('0', 'none')):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_monolith_wall(wall, patterns_rx=None):
+    if not _is_wall_element(wall):
+        return False
+    if not patterns_rx:
+        return False
+    try:
+        txt = _wall_match_text(wall)
+        return bool(_match_any(patterns_rx, txt))
+    except Exception:
+        return False
+
+
 def _is_curtain_wall(wall):
-    if wall is None or not isinstance(wall, DB.Wall): return False
+    if not _is_wall_element(wall):
+        return False
     try:
         wt = getattr(wall, 'WallType', None)
         if wt and getattr(wt, 'Kind', None) == DB.WallKind.Curtain: return True
@@ -424,6 +615,77 @@ def _project_dist_on_curve_xy_ft(curve, seg_len_ft, pt_xyz, tol_ft, end_extensio
         if end_ext > 1e-9 and ((norm-1.0)*seg_len) <= end_ext: norm = 1.0
         else: return None
     return norm * seg_len
+
+
+def _get_room_at_point_safe(doc, pt):
+    if doc is None or pt is None:
+        return None
+    try:
+        return doc.GetRoomAtPoint(pt)
+    except Exception:
+        pass
+    try:
+        phase = None
+        for ph in DB.FilteredElementCollector(doc).OfClass(DB.Phase):
+            phase = ph
+        if phase is not None:
+            return doc.GetRoomAtPoint(pt, phase)
+    except Exception:
+        pass
+    return None
+
+
+def _is_room_outer_boundary_segment(link_doc, room, curve, probe_mm=200.0):
+    if link_doc is None or room is None or curve is None:
+        return False
+    try:
+        probe_ft = float(mm_to_ft(probe_mm) or 0.0)
+    except Exception:
+        probe_ft = 0.0
+    if probe_ft <= 1e-6:
+        probe_ft = float(mm_to_ft(200.0) or 0.0)
+
+    try:
+        mid = curve.Evaluate(0.5, True)
+        d = curve.ComputeDerivatives(0.5, True)
+        v = d.BasisX if d else None
+        if mid is None or v is None:
+            return False
+        n = DB.XYZ(-float(v.Y), float(v.X), 0.0)
+        if n.GetLength() <= 1e-9:
+            return False
+        n = n.Normalize()
+    except Exception:
+        return False
+
+    try:
+        p1 = DB.XYZ(float(mid.X + n.X * probe_ft), float(mid.Y + n.Y * probe_ft), float(mid.Z))
+        p2 = DB.XYZ(float(mid.X - n.X * probe_ft), float(mid.Y - n.Y * probe_ft), float(mid.Z))
+    except Exception:
+        return False
+
+    in1 = False
+    in2 = False
+    try:
+        in1 = bool(room.IsPointInRoom(p1))
+    except Exception:
+        in1 = False
+    try:
+        in2 = bool(room.IsPointInRoom(p2))
+    except Exception:
+        in2 = False
+
+    opposite_pt = None
+    if in1 and (not in2):
+        opposite_pt = p2
+    elif in2 and (not in1):
+        opposite_pt = p1
+    else:
+        return False
+
+    opp_room = _get_room_at_point_safe(link_doc, opposite_pt)
+    return opp_room is None
+
 
 def _merge_intervals(intervals, lo, hi):
     out = []

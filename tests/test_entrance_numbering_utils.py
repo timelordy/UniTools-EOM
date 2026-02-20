@@ -158,6 +158,27 @@ class TestSelectMainEntrancePerLevel(unittest.TestCase):
         main = utils.select_main_entrance_per_level(entrances)
         self.assertEqual(len(main), 1)
         self.assertIn(u'витраж', main[0]['door_type'].lower())
+
+    def test_group_by_level_elevation_when_level_name_missing(self):
+        """Если имена уровней пустые/одинаковые, группировка идет по отметке."""
+        entrances = [
+            {'bs_number': 1, 'door_type': 'Стальная', 'level_name': '', 'level_elevation': 10.33},
+            {'bs_number': 1, 'door_type': 'Витражная', 'level_name': '', 'level_elevation': 20.67},
+            {'bs_number': 1, 'door_type': 'Обычная', 'level_name': '', 'level_elevation': 10.35},
+        ]
+
+        main = utils.select_main_entrance_per_level(entrances)
+        self.assertEqual(len(main), 2)
+
+    def test_group_by_level_id_has_priority(self):
+        """При наличии level_id один и тот же level_name не склеивает разные этажи."""
+        entrances = [
+            {'bs_number': 1, 'door_type': 'Стальная', 'level_name': 'Этаж', 'level_id': 101},
+            {'bs_number': 1, 'door_type': 'Витражная', 'level_name': 'Этаж', 'level_id': 102},
+        ]
+
+        main = utils.select_main_entrance_per_level(entrances)
+        self.assertEqual(len(main), 2)
     
     def test_empty_list(self):
         """Тест пустого списка"""

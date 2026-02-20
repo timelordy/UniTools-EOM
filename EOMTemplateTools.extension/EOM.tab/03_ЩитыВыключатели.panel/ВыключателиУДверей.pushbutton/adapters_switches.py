@@ -342,7 +342,7 @@ def calc_switch_position(door_info, place_inside_room, reference_room, link_tran
         # 3) Старые fallback-правила по центрам/ориентации, если геометрический probe не помог
         if surface_source == "default":
             if not place_inside_room:
-                # Для влажных помещений приоритетно ставим СНАРУЖИ reference_room
+                # Для мокрых точек приоритетно ставим СНАРУЖИ reference_room
                 ref_center = get_room_center(reference_room) if reference_room else None
                 if ref_center:
                     ref_center_host = link_transform.OfPoint(ref_center)

@@ -5,6 +5,209 @@ from pyrevit import DB
 from utils_units import mm_to_ft
 import socket_utils as su
 
+DEFAULT_SKIP_EXTERIOR_WALLS = True
+DEFAULT_SKIP_MONOLITH_WALLS = True
+DEFAULT_SKIP_STRUCTURAL_WALLS = True
+DEFAULT_EXTERIOR_BY_BOUNDARY_GEOMETRY = True
+DEFAULT_EXTERIOR_REQUIRES_OPENINGS = True
+DEFAULT_EXTERIOR_MIN_SEGMENT_MM = 500
+DEFAULT_EXTERIOR_WALL_PATTERNS = [u'наруж', u'внеш', u'фасад', u'нр_', u'nr_', u'exterior', u'outside', u'facade']
+DEFAULT_MONOLITH_WALL_PATTERNS = [u'кж', u'монолит', u'монол', u'железобет', u'жб', u'бетон', u'concrete', u'struct']
+
+
+def _as_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    try:
+        txt = (value or '').strip().lower()
+    except Exception:
+        return bool(default)
+    if txt in ('1', 'true', 'yes', 'y', 'on', u'да'):
+        return True
+    if txt in ('0', 'false', 'no', 'n', 'off', u'нет'):
+        return False
+    return bool(default)
+
+
+def _merge_patterns(default_patterns, custom_patterns):
+    out = []
+    try:
+        for p in (default_patterns or []):
+            if p and (p not in out):
+                out.append(p)
+    except Exception:
+        pass
+
+    if custom_patterns is None:
+        return out
+    try:
+        src = custom_patterns if isinstance(custom_patterns, (list, tuple)) else [custom_patterns]
+    except Exception:
+        src = []
+    for p in src:
+        try:
+            if p and (p not in out):
+                out.append(p)
+        except Exception:
+            continue
+    return out
+
+
+def build_kitchen_wall_filter(rules):
+    rules = rules or {}
+    exterior_patterns = _merge_patterns(
+        DEFAULT_EXTERIOR_WALL_PATTERNS,
+        rules.get('socket_general_exterior_wall_name_patterns'),
+    )
+    monolith_patterns = _merge_patterns(
+        DEFAULT_MONOLITH_WALL_PATTERNS,
+        rules.get('socket_general_monolith_wall_name_patterns'),
+    )
+    try:
+        exterior_min_seg_ft = float(
+            mm_to_ft(
+                float(
+                    rules.get(
+                        'socket_general_exterior_min_segment_mm',
+                        DEFAULT_EXTERIOR_MIN_SEGMENT_MM
+                    ) or 0.0
+                ) or 0.0
+            ) or 0.0
+        )
+    except Exception:
+        exterior_min_seg_ft = float(mm_to_ft(DEFAULT_EXTERIOR_MIN_SEGMENT_MM) or 0.0)
+
+    return {
+        'skip_exterior': _as_bool(
+            rules.get('socket_general_skip_exterior_walls', DEFAULT_SKIP_EXTERIOR_WALLS),
+            DEFAULT_SKIP_EXTERIOR_WALLS,
+        ),
+        'exterior_by_geom': _as_bool(
+            rules.get('socket_general_exterior_by_boundary_geometry', DEFAULT_EXTERIOR_BY_BOUNDARY_GEOMETRY),
+            DEFAULT_EXTERIOR_BY_BOUNDARY_GEOMETRY,
+        ),
+        'exterior_requires_openings': _as_bool(
+            rules.get('socket_general_exterior_requires_openings', DEFAULT_EXTERIOR_REQUIRES_OPENINGS),
+            DEFAULT_EXTERIOR_REQUIRES_OPENINGS,
+        ),
+        'exterior_min_seg_ft': exterior_min_seg_ft,
+        'skip_monolith': _as_bool(
+            rules.get('socket_general_skip_monolith_walls', DEFAULT_SKIP_MONOLITH_WALLS),
+            DEFAULT_SKIP_MONOLITH_WALLS,
+        ),
+        'skip_structural': _as_bool(
+            rules.get('socket_general_skip_structural_walls', DEFAULT_SKIP_STRUCTURAL_WALLS),
+            DEFAULT_SKIP_STRUCTURAL_WALLS,
+        ),
+        'exterior_rx': su._compile_patterns(exterior_patterns),
+        'monolith_rx': su._compile_patterns(monolith_patterns),
+    }
+
+
+def _segment_curve(p0, p1):
+    try:
+        return DB.Line.CreateBound(p0, p1)
+    except Exception:
+        class _FallbackCurve(object):
+            def __init__(self, pp0, pp1):
+                self._p0 = pp0
+                self._p1 = pp1
+                self.Length = float(domain.dist_xy(pp0, pp1))
+        try:
+            return _FallbackCurve(p0, p1)
+        except Exception:
+            return None
+
+
+def filter_room_wall_segments(link_doc, room, segs, wall_filter=None, openings_cache=None):
+    if not segs:
+        return []
+    if wall_filter is None:
+        wall_filter = build_kitchen_wall_filter(None)
+    if openings_cache is None:
+        openings_cache = {}
+
+    filtered = []
+    for seg in (segs or []):
+        try:
+            p0, p1, wall = seg
+        except Exception:
+            continue
+        if wall is None:
+            continue
+
+        try:
+            seg_len = float(domain.dist_xy(p0, p1))
+        except Exception:
+            seg_len = 0.0
+        if seg_len <= 1e-6:
+            continue
+
+        try:
+            if su._is_curtain_wall(wall):
+                continue
+        except Exception:
+            pass
+
+        try:
+            if wall_filter.get('skip_structural') and su._is_structural_wall(wall):
+                continue
+        except Exception:
+            pass
+
+        try:
+            if wall_filter.get('skip_monolith') and su._is_monolith_wall(
+                wall,
+                patterns_rx=wall_filter.get('monolith_rx'),
+            ):
+                continue
+        except Exception:
+            pass
+
+        is_exterior = False
+        try:
+            if wall_filter.get('skip_exterior'):
+                if wall_filter.get('exterior_by_geom', True):
+                    curve = _segment_curve(p0, p1)
+                    if curve is not None:
+                        is_exterior = bool(su._is_room_outer_boundary_segment(link_doc, room, curve))
+                else:
+                    is_exterior = bool(
+                        su._is_exterior_wall(wall, patterns_rx=wall_filter.get('exterior_rx'))
+                    )
+        except Exception:
+            is_exterior = False
+
+        if is_exterior:
+            try:
+                if wall_filter.get('exterior_requires_openings', False):
+                    ops = su._get_wall_openings_cached(link_doc, wall, openings_cache)
+                    has_openings = bool((ops.get('doors') or []) or (ops.get('windows') or []))
+                    if not has_openings:
+                        is_exterior = False
+            except Exception:
+                pass
+
+        if is_exterior:
+            try:
+                min_seg_ft = float(wall_filter.get('exterior_min_seg_ft', 0.0) or 0.0)
+            except Exception:
+                min_seg_ft = 0.0
+            if min_seg_ft > 1e-9 and seg_len < min_seg_ft:
+                is_exterior = False
+
+        if is_exterior:
+            continue
+
+        filtered.append(seg)
+
+    return filtered
+
+
 def midpoint_between_projections_xy(pt1, pt2, p0, p1, end_clear=0.0, point_factory=None):
     if not pt1 or not pt2 or not p0 or not p1: return None
     proj1 = domain.closest_point_on_segment_xy(pt1, p0, p1)
@@ -147,7 +350,16 @@ def get_candidates(segs, best_sink, best_stove, offset_sink_ft, offset_stove_ft,
 
     return candidates, seg_sink, seg_stove, proj_sink, proj_stove
 
-def get_perimeter_candidates(link_doc, segs, sink_pt, stove_pt, fridge_pt, count=2, min_spacing_ft=mm_to_ft(3000)):
+def get_perimeter_candidates(
+    link_doc,
+    segs,
+    sink_pt,
+    stove_pt,
+    fridge_pt,
+    count=2,
+    min_spacing_ft=mm_to_ft(3000),
+    openings_cache=None,
+):
     """
     Generates perimeter candidates.
     Excludes: 
@@ -157,7 +369,10 @@ def get_perimeter_candidates(link_doc, segs, sink_pt, stove_pt, fridge_pt, count
     Enforces min_spacing_ft (default 3m = ~9.84ft).
     """
     candidates = []
-    if not segs: return candidates
+    if not segs:
+        return candidates
+    if openings_cache is None:
+        openings_cache = {}
     
     # 1. Identify Walls and Exclusion Intervals
     wall_exclusions = {} # {wall_id: [(start, end), ...]}
@@ -224,7 +439,7 @@ def get_perimeter_candidates(link_doc, segs, sink_pt, stove_pt, fridge_pt, count
         blocked.append((seg_len - mm_to_ft(100), seg_len))
         
         # Add Windows/Doors
-        ops = su._get_wall_openings_cached(link_doc, wall, {})
+        ops = su._get_wall_openings_cached(link_doc, wall, openings_cache)
         for pt, w in ops.get('windows', []) + ops.get('doors', []):
             half = (float(w) * 0.5) if w else mm_to_ft(450)
             d0 = su._project_dist_on_curve_xy_ft(curve, seg_len, pt, tol_ft=2.0)

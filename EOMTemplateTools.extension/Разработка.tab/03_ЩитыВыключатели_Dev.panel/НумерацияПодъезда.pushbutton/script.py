@@ -200,6 +200,142 @@ def _check_existing_box_nearby(doc, point, dedupe_radius_mm):
     return False
 
 
+def _get_all_levels(doc):
+    """Возвращает список уровней документа."""
+    try:
+        return list(DB.FilteredElementCollector(doc).OfClass(DB.Level))
+    except Exception:
+        return []
+
+
+def _resolve_placement_level(doc, entrance_info, fallback_point=None):
+    """Определяет уровень для размещения, привязываясь к этажу двери."""
+    levels = _get_all_levels(doc)
+    if not levels:
+        return None
+
+    # 1) Прямое совпадение по level_id, если он известен.
+    level_id_value = entrance_info.get('level_id')
+    if level_id_value is not None:
+        try:
+            target_id = int(level_id_value)
+        except Exception:
+            target_id = None
+        if target_id is not None and target_id >= 0:
+            for lv in levels:
+                try:
+                    if int(lv.Id.IntegerValue) == target_id:
+                        return lv
+                except Exception:
+                    continue
+
+    # 2) Совпадение по имени уровня.
+    level_name = entrance_info.get('level_name', u'')
+    if level_name:
+        for lv in levels:
+            try:
+                if lv.Name == level_name:
+                    return lv
+            except Exception:
+                continue
+
+    # 3) Fallback: ближайший уровень к базовой отметке двери (без +высоты установки).
+    base_z = None
+    location = entrance_info.get('location')
+    if location is not None:
+        try:
+            base_z = float(location.Z)
+        except Exception:
+            base_z = None
+
+    if base_z is None:
+        level_elevation = entrance_info.get('level_elevation')
+        try:
+            base_z = float(level_elevation)
+        except Exception:
+            base_z = None
+
+    if base_z is None and fallback_point is not None:
+        try:
+            base_z = float(fallback_point.Z)
+        except Exception:
+            base_z = None
+
+    if base_z is not None:
+        try:
+            return min(levels, key=lambda lv: abs(float(lv.Elevation) - base_z))
+        except Exception:
+            pass
+
+    return levels[0]
+
+
+def _set_instance_target_elevation(doc, instance, target_z_ft):
+    """
+    Явно задает отметку экземпляра от уровня.
+
+    В некоторых семействах OneLevelBased API может игнорировать Z точки при создании.
+    """
+    if instance is None or target_z_ft is None:
+        return
+
+    try:
+        level_id = getattr(instance, 'LevelId', None)
+        if not level_id or level_id == DB.ElementId.InvalidElementId:
+            return
+        level = doc.GetElement(level_id)
+        if level is None:
+            return
+        level_z_ft = float(level.Elevation)
+    except Exception:
+        return
+
+    try:
+        offset_ft = float(target_z_ft) - float(level_z_ft)
+    except Exception:
+        return
+
+    set_ok = False
+
+    # Стандартный встроенный параметр.
+    try:
+        p = instance.get_Parameter(DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM)
+        if p and (not p.IsReadOnly) and p.StorageType == DB.StorageType.Double:
+            p.Set(offset_ft)
+            set_ok = True
+    except Exception:
+        set_ok = False
+
+    # Локализованные/типовые имена параметра.
+    if not set_ok:
+        for param_name in (
+            u'Отметка от уровня',
+            u'Смещение от уровня',
+            u'Elevation from Level',
+            u'Offset from Level',
+        ):
+            try:
+                p = instance.LookupParameter(param_name)
+                if p and (not p.IsReadOnly) and p.StorageType == DB.StorageType.Double:
+                    p.Set(offset_ft)
+                    set_ok = True
+                    break
+            except Exception:
+                continue
+
+    # Последний fallback: двигаем элемент по Z.
+    if not set_ok:
+        try:
+            location = instance.Location
+            if isinstance(location, DB.LocationPoint):
+                current_z = float(location.Point.Z)
+                dz = float(target_z_ft) - current_z
+                if abs(dz) > 1e-6:
+                    DB.ElementTransformUtils.MoveElement(doc, instance.Id, DB.XYZ(0.0, 0.0, dz))
+        except Exception:
+            pass
+
+
 def _place_box_at_entrance(doc, box_symbol, entrance_info, rules):
     """
     Размещает распаячную коробку у входа в БС.
@@ -228,27 +364,9 @@ def _place_box_at_entrance(doc, box_symbol, entrance_info, rules):
         # Убедимся что символ активен
         ensure_symbol_active(box_symbol)
         
-        # Размещаем коробку
-        # Для электрооборудования используем NewFamilyInstance с уровнем
-        level_name = entrance_info.get('level_name', u'')
-        level = None
-        
-        # Пытаемся найти уровень по имени
-        if level_name:
-            level_collector = DB.FilteredElementCollector(doc).OfClass(DB.Level)
-            for lv in level_collector:
-                if lv.Name == level_name:
-                    level = lv
-                    break
-        
-        # Если не нашли уровень - используем ближайший
-        if not level:
-            level_collector = DB.FilteredElementCollector(doc).OfClass(DB.Level)
-            levels = list(level_collector)
-            if levels:
-                # Находим ближайший уровень по высоте
-                level = min(levels, key=lambda lv: abs(lv.Elevation - placement_point.Z))
-        
+        # Размещаем коробку:
+        # выбираем уровень по этажу двери, а не по точке с +2200 мм.
+        level = _resolve_placement_level(doc, entrance_info, fallback_point=placement_point)
         if not level:
             logger.error(u"Не найден уровень для размещения коробки")
             return None
@@ -262,6 +380,9 @@ def _place_box_at_entrance(doc, box_symbol, entrance_info, rules):
         )
         
         if instance:
+            # Явно выставляем целевую отметку относительно выбранного уровня.
+            _set_instance_target_elevation(doc, instance, placement_point.Z)
+
             # Записываем параметры
             bs_number = entrance_info['bs_number']
             comment_text = u"{} БС{}".format(COMMENT_TAG, bs_number)
@@ -293,64 +414,91 @@ def main():
         alert(u"Ошибка загрузки конфигурации: {}".format(e))
         return
     
-    # Шаг 1: Выбор связанной АР модели
-    output.print_md('## Шаг 1: Выбор связанной АР модели')
-    
+    # Шаг 1: Выбор связанных АР моделей + уровней
+    output.print_md('## Шаг 1: Выбор связей и уровней')
     try:
-        link_instances = link_reader.get_all_link_instances(doc)
-        if not link_instances:
-            alert(u"В проекте нет связанных моделей Revit!\n\n"
-                  u"Пожалуйста, подключите АР модель через Insert → Link Revit.")
+        selected_pairs = link_reader.select_link_level_pairs(
+            doc,
+            link_title=u'Выберите связь(и) АР',
+            level_title=u'Выберите уровни для обработки',
+            default_all_links=True,
+            default_all_levels=True,
+            loaded_only=True
+        )
+        if not selected_pairs:
+            output.print_md(u"⚠ **Отменено: не выбраны связи/уровни**")
             return
-        
-        selected_link = link_reader.pick_link_interactive(doc, uidoc, link_instances)
-        if not selected_link:
-            output.print_md(u"⚠ Отменено пользователем")
-            return
-        
-        link_doc = selected_link['doc']
-        link_transform = selected_link['transform']
-        link_name = selected_link['name']
-        
-        output.print_md(u"✓ Выбрана связь: **{}**".format(link_name))
-        
     except Exception as e:
-        alert(u"Ошибка при работе со связанной моделью: {}".format(e))
+        alert(u"Ошибка при выборе связей/уровней: {}".format(e))
         logger.exception(e)
         return
-    
+
     # Шаг 2: Поиск входов в БС
     output.print_md('## Шаг 2: Поиск входов в блок-секции')
-    
+    main_entrances = []
     try:
-        entrances = entrance_utils.find_bs_entrance_doors(link_doc, link_transform)
-        
-        if not entrances:
-            output.print_md(u"⚠ **Не найдено входов в блок-секции!**")
-            output.print_md(u"\nВозможные причины:")
-            output.print_md(u"- В связанной модели нет входных дверей (витражных/стальных двупольных)")
-            output.print_md(u"- Названия помещений не содержат номер БС (формат: 'X.YYY')")
-            output.print_md(u"- Двери не соединяют внеквартирный коридор с наружным пространством")
+        for pair in selected_pairs:
+            link_inst = pair.get('link_instance')
+            link_doc = pair.get('link_doc')
+            link_transform = pair.get('transform')
+            levels = list(pair.get('levels') or [])
+            if link_inst is None or link_doc is None or not levels:
+                continue
+
+            try:
+                link_name = link_inst.Name
+            except Exception:
+                link_name = u'<Связь>'
+
+            selected_level_ids = set()
+            for lvl in levels:
+                try:
+                    selected_level_ids.add(int(lvl.Id.IntegerValue))
+                except Exception:
+                    continue
+            if not selected_level_ids:
+                continue
+
+            output.print_md(u"\n### Связь: **{}**".format(link_name))
+            entrances = entrance_utils.find_bs_entrance_doors(link_doc, link_transform)
+            if not entrances:
+                output.print_md(u"⚠ В этой связи входы в БС не найдены")
+                continue
+
+            filtered_entrances = []
+            for entrance in entrances:
+                try:
+                    level_id = entrance.get('level_id')
+                    if level_id is None:
+                        continue
+                    if int(level_id) not in selected_level_ids:
+                        continue
+                except Exception:
+                    continue
+                filtered_entrances.append(entrance)
+
+            if not filtered_entrances:
+                output.print_md(u"⚠ На выбранных уровнях входы не найдены")
+                continue
+
+            output.print_md(u"✓ Найдено входов на выбранных уровнях: **{}**".format(len(filtered_entrances)))
+
+            grouped = entrance_utils.group_entrances_by_bs(filtered_entrances)
+            output.print_md(u"Распределение по блок-секциям:")
+            for bs_num in sorted(grouped.keys()):
+                bs_entrances = grouped[bs_num]
+                output.print_md(u"- **БС{}**: {} вход(ов)".format(bs_num, len(bs_entrances)))
+
+            for bs_num in sorted(grouped.keys()):
+                bs_entrances = grouped[bs_num]
+                main = entrance_utils.select_main_entrance_per_level(bs_entrances)
+                main_entrances.extend(main)
+
+        if not main_entrances:
+            output.print_md(u"⚠ **Не найдено входов на выбранных связях/уровнях**")
             return
-        
-        output.print_md(u"✓ Найдено входов: **{}**".format(len(entrances)))
-        
-        # Группируем по БС
-        grouped = entrance_utils.group_entrances_by_bs(entrances)
-        output.print_md(u"\n### Распределение по блок-секциям:")
-        for bs_num in sorted(grouped.keys()):
-            bs_entrances = grouped[bs_num]
-            output.print_md(u"- **БС{}**: {} вход(ов)".format(bs_num, len(bs_entrances)))
-        
-        # Выбираем основные входы (по одному на уровень)
-        main_entrances = []
-        for bs_num in sorted(grouped.keys()):
-            bs_entrances = grouped[bs_num]
-            main = entrance_utils.select_main_entrance_per_level(bs_entrances)
-            main_entrances.extend(main)
-        
+
         output.print_md(u"\n✓ Отобрано основных входов для размещения: **{}**".format(len(main_entrances)))
-        
     except Exception as e:
         alert(u"Ошибка поиска входов в БС: {}".format(e))
         logger.exception(e)

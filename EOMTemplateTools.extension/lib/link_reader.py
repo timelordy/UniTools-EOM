@@ -325,6 +325,9 @@ def select_levels_multi(doc, title='Select Levels (Multi)', default_all=True):
     if not lvls:
         return []
 
+    if default_all:
+        return list(lvls)
+
     items = []
     for l in lvls:
         try:
@@ -371,6 +374,140 @@ def select_link_instance_auto(host_doc):
         
     # Fallback к первой связи
     return links[0]
+
+
+def select_link_instances_multi(host_doc,
+                                title=u'Выберите связь(и) АР',
+                                default_all=True,
+                                allow_none=True,
+                                loaded_only=False):
+    """Выбор нескольких связей Revit.
+
+    Возвращает список DB.RevitLinkInstance.
+    """
+    if _magic_active():
+        try:
+            selected_links = list(getattr(magic_context, 'SELECTED_LINKS', []) or [])
+        except Exception:
+            selected_links = []
+        if selected_links:
+            return selected_links
+        try:
+            selected_link = getattr(magic_context, 'SELECTED_LINK', None)
+        except Exception:
+            selected_link = None
+        if selected_link is not None:
+            return [selected_link]
+
+    links = list_link_instances(host_doc)
+    if not links:
+        return []
+
+    if loaded_only:
+        loaded = []
+        for ln in links:
+            try:
+                if is_link_loaded(ln):
+                    loaded.append(ln)
+            except Exception:
+                continue
+        links = loaded
+        if not links:
+            return []
+
+    if default_all:
+        return list(links)
+
+    if len(links) == 1:
+        return [links[0]]
+
+    items = []
+    for ln in links:
+        try:
+            name = ln.Name
+        except Exception:
+            name = '<Link>'
+        try:
+            status = 'Loaded' if is_link_loaded(ln) else 'Not loaded'
+        except Exception:
+            status = 'Unknown'
+        items.append((u'{0}  [{1}]'.format(name, status), ln))
+
+    items_sorted = sorted(items, key=lambda x: x[0].lower())
+    picked = forms.SelectFromList.show(
+        [x[0] for x in items_sorted],
+        title=title,
+        multiselect=True,
+        button_name='Select',
+        allow_none=allow_none
+    )
+
+    if not picked:
+        return []
+
+    selected = []
+    picked_set = set(picked if isinstance(picked, (list, tuple, set)) else [picked])
+    for label, inst in items_sorted:
+        if label in picked_set:
+            selected.append(inst)
+    return selected
+
+
+def select_link_level_pairs(host_doc,
+                            link_title=u'Выберите связь(и) АР',
+                            level_title=u'Выберите уровни',
+                            default_all_links=True,
+                            default_all_levels=True,
+                            loaded_only=True):
+    """Выбирает несколько связей и уровни для каждой связи.
+
+    Returns:
+        list[dict]: [
+            {
+                'link_instance': DB.RevitLinkInstance,
+                'link_doc': DB.Document,
+                'transform': DB.Transform,
+                'levels': list[DB.Level]
+            }
+        ]
+    """
+    link_instances = select_link_instances_multi(
+        host_doc,
+        title=link_title,
+        default_all=default_all_links,
+        allow_none=True,
+        loaded_only=loaded_only
+    )
+    if not link_instances:
+        return []
+
+    pairs = []
+    multi = len(link_instances) > 1
+    for ln in link_instances:
+        link_doc = get_link_doc(ln)
+        if link_doc is None:
+            continue
+
+        try:
+            link_name = ln.Name
+        except Exception:
+            link_name = u'<Связь>'
+
+        levels_prompt = level_title
+        if multi:
+            levels_prompt = u'{0} ({1})'.format(level_title, link_name)
+        levels = select_levels_multi(link_doc, title=levels_prompt, default_all=default_all_levels)
+        if not levels:
+            continue
+
+        pairs.append({
+            'link_instance': ln,
+            'link_doc': link_doc,
+            'transform': get_total_transform(ln),
+            'levels': list(levels),
+        })
+
+    return pairs
 
 
 def iter_elements_by_category(doc, bic, limit=None, level_id=None):
@@ -1274,6 +1411,20 @@ def get_room_centers_by_shape(room, min_wall_clearance_ft=0.0, return_meta=False
 
 
 def select_link_instance(doc, title='Select AR Link', allow_none=False):
+    if _magic_active():
+        try:
+            selected_link = getattr(magic_context, 'SELECTED_LINK', None)
+        except Exception:
+            selected_link = None
+        if selected_link is not None:
+            return selected_link
+        try:
+            selected_links = list(getattr(magic_context, 'SELECTED_LINKS', []) or [])
+        except Exception:
+            selected_links = []
+        if selected_links:
+            return selected_links[0]
+
     links = list_link_instances(doc)
     if not links:
         return None
@@ -1286,31 +1437,8 @@ def select_link_instance(doc, title='Select AR Link', allow_none=False):
         except Exception:
             continue
 
-    if len(loaded_links) == 1:
+    if loaded_links:
         return loaded_links[0]
 
-    items = []
-    for ln in links:
-        try:
-            name = ln.Name
-        except Exception:
-            name = '<Link>'
-        status = 'Loaded' if is_link_loaded(ln) else 'Not loaded'
-        items.append((u'{0}  [{1}]'.format(name, status), ln))
-
-    items_sorted = sorted(items, key=lambda x: x[0].lower())
-    picked = forms.SelectFromList.show(
-        [x[0] for x in items_sorted],
-        title=title,
-        multiselect=False,
-        button_name='Select',
-        allow_none=allow_none
-    )
-
-    if not picked:
-        return None
-
-    for label, inst in items_sorted:
-        if label == picked:
-            return inst
-    return None
+    # Fallback: если загруженных связей нет, вернуть первую доступную.
+    return links[0]

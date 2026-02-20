@@ -423,7 +423,13 @@ def run(doc, output):
     link_doc = link_reader.get_link_doc(link_inst)
     if not link_doc: return
 
-    level_ids = None 
+    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни')
+    if not selected_levels:
+        return
+
+    level_ids = [lvl.Id for lvl in selected_levels if getattr(lvl, 'Id', None) is not None]
+    if not level_ids:
+        return
 
     t = link_reader.get_total_transform(link_inst)
     raw_rooms = su._get_all_linked_rooms(link_doc, limit=int(rules.get('scan_limit_rooms', 200) or 200), level_ids=level_ids)
@@ -435,6 +441,8 @@ def run(doc, output):
     fridges_all.extend(_collect_fridge_by_visibility_param(link_doc))
 
     unit_elems_by_room = _collect_kitchen_unit_elements_by_room(link_doc, rules)
+    wall_filter = kup.build_kitchen_wall_filter(rules)
+    openings_cache = {}
 
     output.print_md('Мойки: **{0}**; Плиты: **{1}**; Холодильники: **{2}**'.format(
         len(sinks_all or []), len(stoves_all or []), len(fridges_all or [])))
@@ -491,6 +499,13 @@ def run(doc, output):
             pb.update_progress(i, pb.max_value)
 
             segs = adapters._get_wall_segments(room, link_doc)
+            segs = kup.filter_room_wall_segments(
+                link_doc,
+                room,
+                segs,
+                wall_filter=wall_filter,
+                openings_cache=openings_cache,
+            )
             if not segs:
                 skipped += 1
                 continue
@@ -626,7 +641,9 @@ def run(doc, output):
             if needed_perimeter > 0:
                 perim_cands = kup.get_perimeter_candidates(
                     link_doc, segs, best_sink, best_stove, best_fridge, 
-                    count=needed_perimeter, min_spacing_ft=mm_to_ft(3000)
+                    count=needed_perimeter,
+                    min_spacing_ft=mm_to_ft(3000),
+                    openings_cache=openings_cache,
                 )
                 for pc in perim_cands:
                     pc['kind'] = 'general'
@@ -694,5 +711,3 @@ def run(doc, output):
 
     output.print_md('Создано розеток: **{0}**'.format(created))
     return created
-
-

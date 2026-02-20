@@ -35,8 +35,8 @@ def get_total_transform(link_inst):
     return link_reader.get_total_transform(link_inst)
 
 
-def get_all_linked_rooms(link_doc, limit):
-    return su._get_all_linked_rooms(link_doc, limit=limit)
+def get_all_linked_rooms(link_doc, limit=None, level_ids=None):
+    return su._get_all_linked_rooms(link_doc, limit=limit, level_ids=level_ids)
 
 
 def pick_shdup_symbol(host_doc, cfg, rules):

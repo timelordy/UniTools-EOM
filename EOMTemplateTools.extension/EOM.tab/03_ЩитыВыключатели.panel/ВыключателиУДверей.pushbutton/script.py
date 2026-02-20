@@ -9,13 +9,58 @@
 - Остальные комнаты: выключатель внутри комнаты
 """
 import math
+import os
+import sys
+
+# pyRevit reuses IronPython engine; modules with generic names (adapters/constants/domain)
+# can stay cached from another command. Force local modules from this pushbutton folder.
+_BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BUNDLE_DIR not in sys.path:
+    sys.path.insert(0, _BUNDLE_DIR)
+
+
+def _drop_foreign_module(module_name):
+    mod = sys.modules.get(module_name)
+    if mod is None:
+        return
+
+    mod_file = getattr(mod, "__file__", None)
+    if not mod_file:
+        try:
+            del sys.modules[module_name]
+        except Exception:
+            pass
+        return
+
+    try:
+        mod_dir = os.path.dirname(os.path.abspath(mod_file))
+    except Exception:
+        mod_dir = None
+
+    if mod_dir != _BUNDLE_DIR:
+        try:
+            del sys.modules[module_name]
+        except Exception:
+            pass
+
+
+for _module_name in (
+    "adapters",
+    "adapters_doors",
+    "adapters_geometry",
+    "adapters_outlets",
+    "adapters_symbols",
+    "adapters_switches",
+    "constants",
+    "domain",
+):
+    _drop_foreign_module(_module_name)
 
 from pyrevit import DB, forms, revit, script
 from time_savings import report_time_saved
 try:
     import socket_utils as su
 except ImportError:
-    import sys, os
     sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'lib'))
     import socket_utils as su
 
@@ -45,11 +90,63 @@ from domain import contains_any, ft_to_mm
 
 
 def main():
+    import link_reader
+    import magic_context
+
+    if (not bool(getattr(magic_context, 'FORCE_SELECTION', False))
+            and not bool(getattr(magic_context, 'IS_RUNNING', False))):
+        doc = revit.doc
+        output = script.get_output()
+        pairs = link_reader.select_link_level_pairs(
+            doc,
+            link_title=u'Выберите связь(и) АР',
+            level_title=u'Выберите этажи',
+            default_all_links=True,
+            default_all_levels=True,
+            loaded_only=True
+        )
+        if not pairs:
+            output.print_md('**Отменено (связи/уровни не выбраны).**')
+            return 0
+
+        total_created = 0
+        old_force = bool(getattr(magic_context, 'FORCE_SELECTION', False))
+        old_link = getattr(magic_context, 'SELECTED_LINK', None)
+        old_links = list(getattr(magic_context, 'SELECTED_LINKS', []) or [])
+        old_levels = list(getattr(magic_context, 'SELECTED_LEVELS', []) or [])
+        try:
+            for pair in pairs:
+                link_inst = pair.get('link_instance')
+                levels = list(pair.get('levels') or [])
+                if link_inst is None or not levels:
+                    continue
+
+                try:
+                    link_name = link_inst.Name
+                except Exception:
+                    link_name = u'<Связь>'
+                output.print_md(u'## Обработка связи: `{0}`'.format(link_name))
+
+                magic_context.FORCE_SELECTION = True
+                magic_context.SELECTED_LINK = link_inst
+                magic_context.SELECTED_LINKS = [link_inst]
+                magic_context.SELECTED_LEVELS = levels
+
+                total_created += int(main() or 0)
+        finally:
+            magic_context.FORCE_SELECTION = old_force
+            magic_context.SELECTED_LINK = old_link
+            magic_context.SELECTED_LINKS = old_links
+            magic_context.SELECTED_LEVELS = old_levels
+
+        output.print_md(u'---')
+        output.print_md(u'Итог по выбранным связям: **{}** выключателей'.format(total_created))
+        return total_created
+
     doc = revit.doc
     output = script.get_output()
     output.print_md(u"# Размещение выключателей")
 
-    import link_reader
     link_inst = link_reader.select_link_instance_auto(doc)
     if not link_inst:
         forms.alert(u"Связь АР не найдена", exitscript=True)
@@ -462,8 +559,9 @@ def main():
         }
     except: pass
 
-    if created > 0:
+    if created > 0 and not bool(getattr(magic_context, 'FORCE_SELECTION', False)):
         forms.alert(u"Создано {} выключателей".format(created))
+    return created
 
 
 if __name__ == "__main__":

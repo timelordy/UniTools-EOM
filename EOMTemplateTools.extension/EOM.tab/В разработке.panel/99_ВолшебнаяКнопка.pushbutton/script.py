@@ -4,7 +4,7 @@
 Последовательность:
 1. 01 - Общие розетки
 2. 02 - Кухня блок
-3. 05 - Влажные зоны
+3. 05 - Мокрые точки
 4. 07 - ШДУП
 5. Щит над дверью
 6. Выключатели у дверей
@@ -199,32 +199,26 @@ def main():
         output.print_md("Ошибка: не удалось загрузить lib (magic_context/link_reader).")
         return
 
-    # Автовыбор связи и уровней один раз
-    link_inst = link_reader.select_link_instance_auto(doc)
-    if not link_inst:
-        output.print_md("Ошибка: связь АР не найдена (автоматически).")
-        return
-
-    link_doc = link_inst.GetLinkDocument()
-    if not link_doc:
-        output.print_md("Ошибка: связь не загружена. Отмена.")
-        return
-
-    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите этаж(и) для обработки')
-    if not selected_levels:
-        output.print_md("Ошибка: уровни не выбраны. Отмена.")
+    selected_pairs = link_reader.select_link_level_pairs(
+        doc,
+        link_title=u'Выберите связь(и) АР',
+        level_title=u'Выберите этаж(и) для обработки',
+        default_all_links=True,
+        default_all_levels=True,
+        loaded_only=True
+    )
+    if not selected_pairs:
+        output.print_md("Ошибка: связи/уровни не выбраны. Отмена.")
         return
 
     # Активируем общий контекст для всех шагов
     magic_context.IS_RUNNING = True
     magic_context.FORCE_SELECTION = True
-    magic_context.SELECTED_LINK = link_inst
-    magic_context.SELECTED_LEVELS = selected_levels
 
     scripts = [
         ("EOM.tab/04_Розетки.panel/01_Общие.pushbutton/script.py", "01 - Общие розетки"),
         ("EOM.tab/04_Розетки.panel/02_КухняБлок.pushbutton/script.py", "02 - Кухня блок"),
-        ("EOM.tab/04_Розетки.panel/05_ВлажныеЗоны.pushbutton/script.py", "05 - Влажные зоны"),
+        ("EOM.tab/04_Розетки.panel/05_МокрыеТочки.pushbutton/script.py", "05 - Мокрые точки"),
         ("EOM.tab/04_Розетки.panel/07_ШДУП.pushbutton/script.py", "07 - ШДУП"),
         ("EOM.tab/03_ЩитыВыключатели.panel/ЩитНадДверью.pushbutton/script.py", "Щит над дверью"),
         ("EOM.tab/03_ЩитыВыключатели.panel/ВыключателиУДверей.pushbutton/script.py", "Выключатели"),
@@ -234,19 +228,40 @@ def main():
 
     success = 0
     failed = 0
+    interrupted = False
 
-    for script_path, name in scripts:
-        if run_script(script_path, name):
-            success += 1
-        else:
-            failed += 1
-            if not forms.alert("Ошибка в скрипте '{}'.\n\nПродолжить?".format(name), yes=True, no=True):
-                output.print_md("\n---\n## Прервано пользователем")
-                break
+    for pair in selected_pairs:
+        link_inst = pair.get('link_instance')
+        levels = list(pair.get('levels') or [])
+        if link_inst is None or not levels:
+            continue
+
+        try:
+            link_name = link_inst.Name
+        except Exception:
+            link_name = u'<Связь>'
+        output.print_md("\n## Связь: `{}`".format(link_name))
+
+        magic_context.SELECTED_LINK = link_inst
+        magic_context.SELECTED_LINKS = [link_inst]
+        magic_context.SELECTED_LEVELS = levels
+
+        for script_path, name in scripts:
+            if run_script(script_path, name):
+                success += 1
+            else:
+                failed += 1
+                if not forms.alert("Ошибка в скрипте '{}'.\n\nПродолжить?".format(name), yes=True, no=True):
+                    output.print_md("\n---\n## Прервано пользователем")
+                    interrupted = True
+                    break
+        if interrupted:
+            break
 
     magic_context.IS_RUNNING = False
     magic_context.FORCE_SELECTION = False
     magic_context.SELECTED_LINK = None
+    magic_context.SELECTED_LINKS = []
     magic_context.SELECTED_LEVELS = []
 
     output.print_md("\n---")

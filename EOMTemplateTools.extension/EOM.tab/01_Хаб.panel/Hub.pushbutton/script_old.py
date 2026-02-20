@@ -216,7 +216,7 @@ def start_command_monitor():
             "sockets_general": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"01_Общие.pushbutton", "script.py"),
             "kitchen_block": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"02_КухняБлок.pushbutton", "script.py"),
             "ac_sockets": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"04_Кондиционеры.pushbutton", "script.py"),
-            "wet_zones": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"05_ВлажныеЗоны.pushbutton", "script.py"),
+            "wet_zones": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"05_МокрыеТочки.pushbutton", "script.py"),
             "low_voltage": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"06_Слаботочка.pushbutton", "script.py"),
             "shdup": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"07_ШДУП.pushbutton", "script.py"),
             "storage_rooms": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"08_Кладовые.pushbutton", "script.py"),

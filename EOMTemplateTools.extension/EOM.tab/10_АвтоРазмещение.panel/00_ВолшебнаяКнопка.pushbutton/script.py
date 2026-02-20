@@ -5,7 +5,7 @@
 1. Свет по центру
 2. Розетки общие
 3. Кухня (Блок)
-4. Влажная зона
+4. Мокрые точки
 5. Слабочка
 6. ШДУП
 7. Выключатели у дверей
@@ -240,35 +240,28 @@ def main():
     output.print_md("# Волшебная кнопка")
     output.print_md("---")
 
-    # 1. Automatic Link Selection
-    link_inst = link_reader.select_link_instance_auto(doc)
-
-    if not link_inst:
-        output.print_md("Ошибка: связь АР не найдена (автоматически). Проверьте, загружена ли связь.")
-        return
-
-    # 2. Ask for Levels
-    link_doc = link_inst.GetLinkDocument()
-    if not link_doc:
-        output.print_md("Ошибка: связь не загружена. Отмена.")
-        return
-
-    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите этаж(и) для обработки')
-    if not selected_levels:
-        output.print_md("Ошибка: уровни не выбраны. Отмена.")
+    # 1-2. Multi-link + levels selection
+    selected_pairs = link_reader.select_link_level_pairs(
+        doc,
+        link_title=u'Выберите связь(и) АР',
+        level_title=u'Выберите этаж(и) для обработки',
+        default_all_links=True,
+        default_all_levels=True,
+        loaded_only=True
+    )
+    if not selected_pairs:
+        output.print_md("Ошибка: связи/уровни не выбраны. Отмена.")
         return
 
     # 3. Setup Context
     magic_context.IS_RUNNING = True
-    magic_context.SELECTED_LINK = link_inst
-    magic_context.SELECTED_LEVELS = selected_levels
 
     try:
         scripts = [
             ("EOM.tab/02_Освещение.panel/СветПоЦентру.pushbutton/script.py", "1. Свет по центру"),
             ("EOM.tab/04_Розетки.panel/01_Общие.pushbutton/script.py", "2. Розетки общие (бытовые)"),
             ("EOM.tab/04_Розетки.panel/02_КухняБлок.pushbutton/script.py", "3. Кухня (Блок)"),
-            ("EOM.tab/04_Розетки.panel/05_ВлажныеЗоны.pushbutton/script.py", "4. Розетки влажная зона"),
+            ("EOM.tab/04_Розетки.panel/05_МокрыеТочки.pushbutton/script.py", "4. Розетки: мокрые точки"),
             ("EOM.tab/04_Розетки.panel/07_ШДУП.pushbutton/script.py", "5. ШДУП"),
             ("EOM.tab/04_Розетки.panel/06_Слаботочка.pushbutton/script.py", "6. Слабочка"),
             ("EOM.tab/03_ЩитыВыключатели.panel/ЩитНадДверью.pushbutton/script.py", "7. Щит над дверью"),
@@ -280,27 +273,49 @@ def main():
 
         total_time_saved_min = 0.0
         total_time_saved_max = 0.0
-        total_scripts = len(scripts)
+        total_scripts = len(scripts) * len(selected_pairs)
+        processed_scripts = 0
+        interrupted = False
 
-        for index, (script_path, name) in enumerate(scripts, 1):
-            _push_hub_progress(
-                u"Выполняется: {0}".format(name),
-                processed=index - 1,
-                total=total_scripts,
-                errors=failed,
-                skipped=0,
-            )
+        for pair in selected_pairs:
+            link_inst = pair.get('link_instance')
+            levels = list(pair.get('levels') or [])
+            if link_inst is None or not levels:
+                continue
 
-            is_ok, minutes_min, minutes_max = run_script(script_path, name)
-            if is_ok:
-                success += 1
-                total_time_saved_min += minutes_min
-                total_time_saved_max += minutes_max
-            else:
-                failed += 1
-                if not forms.alert("Ошибка в скрипте '{}'.\n\nПродолжить?".format(name), yes=True, no=True):
-                    output.print_md("\n---\n## Прервано пользователем")
-                    break
+            try:
+                link_name = link_inst.Name
+            except Exception:
+                link_name = u'<Связь>'
+            output.print_md("\n## Связь: `{0}`".format(link_name))
+
+            magic_context.SELECTED_LINK = link_inst
+            magic_context.SELECTED_LINKS = [link_inst]
+            magic_context.SELECTED_LEVELS = levels
+
+            for script_path, name in scripts:
+                processed_scripts += 1
+                _push_hub_progress(
+                    u"Выполняется: {0} [{1}]".format(name, link_name),
+                    processed=processed_scripts - 1,
+                    total=total_scripts,
+                    errors=failed,
+                    skipped=0,
+                )
+
+                is_ok, minutes_min, minutes_max = run_script(script_path, name)
+                if is_ok:
+                    success += 1
+                    total_time_saved_min += minutes_min
+                    total_time_saved_max += minutes_max
+                else:
+                    failed += 1
+                    if not forms.alert("Ошибка в скрипте '{}'.\n\nПродолжить?".format(name), yes=True, no=True):
+                        output.print_md("\n---\n## Прервано пользователем")
+                        interrupted = True
+                        break
+            if interrupted:
+                break
 
         output.print_md("\n---")
         output.print_md("## Итоги")
@@ -340,6 +355,7 @@ def main():
         # 5. Reset Context
         magic_context.IS_RUNNING = False
         magic_context.SELECTED_LINK = None
+        magic_context.SELECTED_LINKS = []
         magic_context.SELECTED_LEVELS = []
 
 

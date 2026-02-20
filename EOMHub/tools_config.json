@@ -36,6 +36,15 @@
       "time_saved": 30,
       "script_path": "03_ЩитыВыключатели.panel/ВыключателиУДверей.pushbutton/script.py"
     },
+    "floor_panel_niches": {
+      "id": "floor_panel_niches",
+      "name": "ЩЭВНишах",
+      "icon": "/icons/floor_panel_niches.png",
+      "description": "Размещает этажные щиты в нишах по квартирному фонду.",
+      "category": "panels",
+      "time_saved": 15,
+      "script_path": "03_ЩитыВыключатели.panel/ЩЭВНишах.pushbutton/script.py"
+    },
     "sockets_general": {
       "id": "sockets_general",
       "name": "Розетки общие",
@@ -56,12 +65,12 @@
     },
     "wet_zones": {
       "id": "wet_zones",
-      "name": "Розетки влажные",
+      "name": "Розетки: мокрые точки",
       "icon": "/icons/wet_zones.png",
-      "description": "Ставит защищённые розетки в санузлах и мокрых зонах.",
+      "description": "Ставит защищённые розетки в санузлах и мокрых точках.",
       "category": "sockets",
       "time_saved": 10,
-      "script_path": "04_Розетки.panel/05_ВлажныеЗоны.pushbutton/script.py"
+      "script_path": "04_Розетки.panel/05_МокрыеТочки.pushbutton/script.py"
     },
     "low_voltage": {
       "id": "low_voltage",

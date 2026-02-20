@@ -282,7 +282,7 @@ def main():
     link_levels = link_reader.select_levels_multi(
         link_doc,
         title=u'Выберите уровни из AR (будут созданы в текущем файле)',
-        default_all=False
+        default_all=True
     )
 
     if not link_levels:

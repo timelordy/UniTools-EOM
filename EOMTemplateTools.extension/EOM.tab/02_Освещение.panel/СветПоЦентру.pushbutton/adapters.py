@@ -21,49 +21,6 @@ def select_link_instance_ru(host_doc, title):
     return link_reader.select_link_instance_auto(host_doc)
 
 
-def get_or_create_debug_view(doc, level_id):
-    """Create or return a FloorPlan view named 'DEBUG_LIGHTS_<LevelName>'."""
-    if doc is None or not level_id:
-        return None
-
-    level = doc.GetElement(level_id)
-    if not level:
-        return None
-
-    view_name = 'DEBUG_LIGHTS_{0}'.format(level.Name)
-
-    # Check existing
-    col = DB.FilteredElementCollector(doc).OfClass(DB.ViewPlan).WhereElementIsNotElementType()
-    for v in col:
-        if v.Name == view_name and not v.IsTemplate:
-            return v
-
-    # Create new
-    vft_id = None
-    for vft in DB.FilteredElementCollector(doc).OfClass(DB.ViewFamilyType):
-        if vft.ViewFamily == DB.ViewFamily.FloorPlan:
-            vft_id = vft.Id
-            break
-
-    if not vft_id:
-        return None
-
-    view = DB.ViewPlan.Create(doc, vft_id, level.Id)
-    try:
-        view.Name = view_name
-        # Try to set view range to show lights (cut plane at 1500mm, top at 4000mm)
-        vr = view.GetViewRange()
-        vr.SetOffset(DB.PlanViewPlane.CutPlane, 5.0) # ~1500mm
-        vr.SetOffset(DB.PlanViewPlane.TopClipPlane, 15.0) # ~4500mm
-        vr.SetOffset(DB.PlanViewPlane.BottomClipPlane, 0.0)
-        vr.SetOffset(DB.PlanViewPlane.ViewDepthPlane, 0.0)
-        view.SetViewRange(vr)
-    except Exception:
-        pass
-
-    return view
-
-
 def collect_existing_lights_centers(doc, tolerance_ft=1.5):
     """Return list of (X, Y, Z) for ALL existing lights in project."""
     centers = []
@@ -80,7 +37,104 @@ def collect_existing_lights_centers(doc, tolerance_ft=1.5):
 
 
 def find_family_symbol(doc, family_name, category_bic):
-    return placement_engine.find_family_symbol(doc, family_name, category_bic=category_bic)
+    """Find symbol by exact/flexible matching.
+
+    Supports values like:
+    - "Family : Type"
+    - "TypeName"
+    - full file paths from task docs (e.g. "...\\(FL)_НПБ_1101.rfa")
+    """
+    if not doc or not family_name:
+        return None
+
+    def _aliases(value):
+        raw = value or u''
+        out = [raw]
+
+        # Extract basename from path-like inputs.
+        base = raw.replace('\\', '/').split('/')[-1].strip()
+        if base and base not in out:
+            out.append(base)
+
+        # Trim common file suffixes used in task docs.
+        trims = []
+        for item in list(out):
+            t = item
+            low = t.lower()
+            if low.endswith('.rfa'):
+                t = t[:-4]
+                trims.append(t)
+            low = t.lower()
+            if low.endswith('.zip'):
+                t = t[:-4]
+                trims.append(t)
+        for t in trims:
+            if t and t not in out:
+                out.append(t)
+
+        return [x for x in out if x]
+
+    def _norm_key(value):
+        t = norm(value)
+        if not t:
+            return u''
+        try:
+            t = t.replace('\\', '/').split('/')[-1]
+        except Exception:
+            pass
+        try:
+            if t.endswith('.rfa'):
+                t = t[:-4]
+            if t.endswith('.zip'):
+                t = t[:-4]
+        except Exception:
+            pass
+        try:
+            t = u' '.join(t.split())
+        except Exception:
+            pass
+        return t
+
+    # 1) Native lookup attempts.
+    for alias in _aliases(family_name):
+        try:
+            sym = placement_engine.find_family_symbol(doc, alias, category_bic=category_bic)
+        except Exception:
+            sym = None
+        if sym is not None:
+            return sym
+
+    # 2) Fallback: fuzzy contains match by family/type label.
+    keys = [_norm_key(a) for a in _aliases(family_name)]
+    keys = [k for k in keys if k]
+    if not keys:
+        return None
+
+    collector = placement_engine.iter_family_symbols(doc, category_bic=category_bic, limit=None)
+    for s in collector:
+        try:
+            fam = getattr(getattr(s, 'Family', None), 'Name', u'') or getattr(s, 'FamilyName', u'') or u''
+        except Exception:
+            fam = u''
+        try:
+            typ = s.Name or u''
+        except Exception:
+            typ = u''
+        try:
+            lbl = placement_engine.format_family_type(s) or u''
+        except Exception:
+            lbl = u''
+
+        hay = [
+            _norm_key(fam),
+            _norm_key(typ),
+            _norm_key(lbl),
+        ]
+        for key in keys:
+            if any(key and h and (key in h) for h in hay):
+                return s
+
+    return None
 
 
 def iter_rooms(link_doc, level_id=None):

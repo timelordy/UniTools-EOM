@@ -30,6 +30,132 @@ EXCLUDE_DOOR_KEYWORDS = [
     u'wood', u'wooden', u'interior', u'apartment'
 ]
 
+LEVEL_ELEVATION_BUCKET_FT = 0.5
+
+
+def _safe_float(value):
+    """Преобразует значение в float, возвращает None при ошибке."""
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _safe_int_from_level_id(level_id):
+    """Преобразует ElementId/значение уровня в int, возвращает None при ошибке."""
+    if level_id is None:
+        return None
+    try:
+        if hasattr(level_id, 'IntegerValue'):
+            return int(level_id.IntegerValue)
+        return int(level_id)
+    except Exception:
+        return None
+
+
+def _is_valid_level_id(level_id):
+    """Проверяет валидность ElementId уровня."""
+    if level_id is None:
+        return False
+    try:
+        if level_id == DB.ElementId.InvalidElementId:
+            return False
+    except Exception:
+        pass
+    level_id_int = _safe_int_from_level_id(level_id)
+    if level_id_int is None:
+        return False
+    return level_id_int >= 0
+
+
+def _resolve_level_identity(door_elem, point):
+    """Определяет имя/ID/отметку уровня двери с безопасными fallback."""
+    level_elem = None
+    level_id_int = None
+    level_name = u''
+    level_elevation = None
+
+    # Основной путь: door.LevelId (обычно надежнее и быстрее).
+    try:
+        level_id = getattr(door_elem, 'LevelId', None)
+    except Exception:
+        level_id = None
+
+    if _is_valid_level_id(level_id):
+        level_id_int = _safe_int_from_level_id(level_id)
+        try:
+            level_elem = door_elem.Document.GetElement(level_id)
+        except Exception:
+            level_elem = None
+
+    # Fallback: FAMILY_LEVEL_PARAM (для нестандартных семейств/связей).
+    if level_elem is None:
+        try:
+            level_param = door_elem.get_Parameter(DB.BuiltInParameter.FAMILY_LEVEL_PARAM)
+        except Exception:
+            level_param = None
+        if level_param:
+            try:
+                family_level_id = level_param.AsElementId()
+            except Exception:
+                family_level_id = None
+            if _is_valid_level_id(family_level_id):
+                level_id_int = _safe_int_from_level_id(family_level_id)
+                try:
+                    level_elem = door_elem.Document.GetElement(family_level_id)
+                except Exception:
+                    level_elem = None
+
+    if level_elem is not None:
+        try:
+            level_name = level_elem.Name or u''
+        except Exception:
+            level_name = u''
+        try:
+            level_elevation = float(level_elem.Elevation)
+        except Exception:
+            level_elevation = None
+
+    # Последний fallback: берем Z точки двери (уже с учетом transform).
+    if level_elevation is None and point is not None:
+        try:
+            level_elevation = float(point.Z)
+        except Exception:
+            level_elevation = None
+
+    return level_name, level_id_int, level_elevation
+
+
+def _get_entrance_level_group_key(entrance):
+    """Возвращает устойчивый ключ группировки входов по этажам."""
+    level_id_int = _safe_int_from_level_id(entrance.get('level_id'))
+    if level_id_int is not None and level_id_int >= 0:
+        return ('id', level_id_int)
+
+    level_elevation = _safe_float(entrance.get('level_elevation'))
+    if level_elevation is None:
+        location = entrance.get('location')
+        level_elevation = _safe_float(getattr(location, 'Z', None))
+    if level_elevation is not None:
+        bucket = int(round(level_elevation / LEVEL_ELEVATION_BUCKET_FT))
+        return ('elev', bucket)
+
+    level_name = entrance.get('level_name', u'') or u''
+    return ('name', level_name)
+
+
+def _entrance_sort_key(entrance):
+    """Сортировка входов по БС и этажу (числовая отметка в приоритете)."""
+    level_elevation = _safe_float(entrance.get('level_elevation'))
+    if level_elevation is None:
+        location = entrance.get('location')
+        level_elevation = _safe_float(getattr(location, 'Z', None))
+    if level_elevation is not None:
+        level_key = (0, level_elevation)
+    else:
+        level_key = (1, entrance.get('level_name', u'') or u'')
+    return (entrance.get('bs_number', 0), level_key)
+
 
 def extract_bs_number(room_name):
     """
@@ -189,15 +315,8 @@ def is_bs_entrance_door(door_elem, link_transform=None):
         if link_transform:
             point = link_transform.OfPoint(point)
         
-        # Получаем уровень
-        level_param = door_elem.get_Parameter(DB.BuiltInParameter.FAMILY_LEVEL_PARAM)
-        level_name = u''
-        if level_param:
-            level_id = level_param.AsElementId()
-            if level_id and level_id != DB.ElementId.InvalidElementId:
-                level_elem = door_elem.Document.GetElement(level_id)
-                if level_elem:
-                    level_name = level_elem.Name
+        # Получаем уровень (имя, id, elevation)
+        level_name, level_id_int, level_elevation = _resolve_level_identity(door_elem, point)
         
         return {
             'bs_number': bs_number,
@@ -207,6 +326,8 @@ def is_bs_entrance_door(door_elem, link_transform=None):
             'corridor_room': corridor_room,
             'location': point,
             'level_name': level_name,
+            'level_id': level_id_int,
+            'level_elevation': level_elevation,
             'from_room': from_room_name,
             'to_room': to_room_name
         }
@@ -253,8 +374,8 @@ def find_bs_entrance_doors(link_doc, link_transform):
             if entrance_info:
                 entrances.append(entrance_info)
         
-        # Сортируем по номеру БС, затем по уровню
-        entrances.sort(key=lambda x: (x['bs_number'], x['level_name']))
+        # Сортируем по номеру БС, затем по отметке уровня (или имени как fallback)
+        entrances.sort(key=_entrance_sort_key)
         
     except Exception as e:
         # В случае ошибки возвращаем пустой список
@@ -301,15 +422,18 @@ def select_main_entrance_per_level(bs_entrances):
     """
     # Группируем по уровням
     by_level = {}
+    level_order = []
     for entrance in bs_entrances:
-        level = entrance.get('level_name', u'')
-        if level not in by_level:
-            by_level[level] = []
-        by_level[level].append(entrance)
+        level_key = _get_entrance_level_group_key(entrance)
+        if level_key not in by_level:
+            by_level[level_key] = []
+            level_order.append(level_key)
+        by_level[level_key].append(entrance)
     
     # Для каждого уровня выбираем основной вход
     main_entrances = []
-    for level, level_entrances in by_level.items():
+    for level_key in level_order:
+        level_entrances = by_level[level_key]
         if len(level_entrances) == 1:
             main_entrances.append(level_entrances[0])
         else:

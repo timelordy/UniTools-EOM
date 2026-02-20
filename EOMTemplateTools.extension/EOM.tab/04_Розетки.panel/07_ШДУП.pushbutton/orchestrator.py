@@ -1,10 +1,8 @@
 ﻿# -*- coding: utf-8 -*-
 
-import math
-from pyrevit import DB, forms, script
+from pyrevit import DB
 import adapters
 import constants
-import domain
 import domain
 try:
     import socket_utils as su
@@ -14,7 +12,7 @@ except ImportError:
     if lib_path not in sys.path:
         sys.path.append(lib_path)
     import socket_utils as su
-from utils_units import mm_to_ft, ft_to_mm
+from utils_units import mm_to_ft
 
 
 def run(doc, output):
@@ -39,8 +37,8 @@ def run(doc, output):
 
     sym, sym_lbl = adapters.pick_shdup_symbol(doc, cfg, rules)
     if not sym:
-        alert('Не найден тип ШДУП. Загрузите семейство/тип в проект и повторите.')
-        return
+        output.print_md('**Ошибка:** Не найден тип ШДУП. Загрузите семейство/тип в проект и повторите.')
+        return 0
 
     try:
         su._store_symbol_id(cfg, 'last_shdup_symbol_id', sym)
@@ -51,14 +49,26 @@ def run(doc, output):
 
     link_inst = adapters.select_link_instance(doc, 'Выберите связь АР')
     if not link_inst:
-        return
+        return 0
     link_doc = adapters.get_link_doc(link_inst)
     if not link_doc:
-        return
+        return 0
 
     t = adapters.get_total_transform(link_inst)
 
-    raw_rooms = adapters.get_all_linked_rooms(link_doc, limit=int(rules.get('scan_limit_rooms', 200) or 200))
+    import link_reader
+    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни')
+    if not selected_levels:
+        return 0
+    level_ids = [lvl.Id for lvl in selected_levels if getattr(lvl, 'Id', None) is not None]
+    if not level_ids:
+        return 0
+
+    raw_rooms = adapters.get_all_linked_rooms(
+        link_doc,
+        limit=int(rules.get('scan_limit_rooms', 200) or 200),
+        level_ids=level_ids
+    )
     bath_rx = su._compile_patterns(rules.get('bath_room_name_patterns', []) or rules.get('wet_room_name_patterns', []) or constants.DEFAULT_BATH_PATTERNS)
 
     rooms = []
@@ -77,8 +87,8 @@ def run(doc, output):
         LAST_ROOM_COUNT = None
 
     if not rooms:
-        alert('Нет подходящих помещений ванной (по паттернам).')
-        return
+        output.print_md('Связь пропущена: нет подходящих помещений ванной (по паттернам).')
+        return 0
 
     output.print_md('Найдено помещений ванных: **{0}** (из {1} всего отсканировано)'.format(
         len(rooms), len(raw_rooms)
@@ -115,8 +125,8 @@ def run(doc, output):
     ))
 
     if not sinks_all and not tubs_all:
-        alert('Не найдено ни раковин, ни ванн в связи (AR).')
-        return
+        output.print_md('Связь пропущена: не найдено ни раковин, ни ванн в связи (AR).')
+        return 0
 
     try:
         ids_before, _elems_before, existing_pts = adapters.collect_tagged_instances(doc, comment_value, symbol_id=int(sym.Id.IntegerValue))
@@ -424,4 +434,4 @@ def run(doc, output):
             skip_no_fixtures, skip_no_segs, skip_no_pair, skip_no_chosen, skip_geom, skip_vec, skip_dup
         ))
 
-
+    return created

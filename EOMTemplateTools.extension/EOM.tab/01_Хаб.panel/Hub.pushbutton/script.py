@@ -1135,7 +1135,6 @@ def start_command_monitor(start_thread=True):
         tab_dirs = [
             _os.path.join(extension_dir, u"EOM.tab"),
             _os.path.join(extension_dir, u"Разработка.tab"),
-            _os.path.join(extension_dir, u"Teslabim.tab"),
         ]
         
         try:
@@ -1177,12 +1176,13 @@ def start_command_monitor(start_thread=True):
             "lights_pk": _os.path.join(extension_dir, u"Разработка.tab", u"02_Освещение_Dev.panel", u"СветПК.pushbutton", u"script.py"),
             "panel_door": _os.path.join(extension_dir, u"EOM.tab", u"03_ЩитыВыключатели.panel", u"ЩитНадДверью.pushbutton", u"script.py"),
             "switches_doors": _os.path.join(extension_dir, u"EOM.tab", u"03_ЩитыВыключатели.panel", u"ВыключателиУДверей.pushbutton", u"script.py"),
+            "floor_panel_niches": _os.path.join(extension_dir, u"EOM.tab", u"03_ЩитыВыключатели.panel", u"ЩЭВНишах.pushbutton", u"script.py"),
             "entrance_numbering": _os.path.join(extension_dir, u"Разработка.tab", u"03_ЩитыВыключатели_Dev.panel", u"НумерацияПодъезда.pushbutton", u"script.py"),
             "sockets_general": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"01_Общие.pushbutton", u"script.py"),
             "kitchen_block": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"02_КухняБлок.pushbutton", u"script.py"),
             "kitchen_general": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"02_КухняБлок.pushbutton", u"script.py"),
             "ac_sockets": _os.path.join(extension_dir, u"Разработка.tab", u"04_Розетки.panel", u"04_Кондиционеры.pushbutton", u"script.py"),
-            "wet_zones": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"05_ВлажныеЗоны.pushbutton", u"script.py"),
+            "wet_zones": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"05_МокрыеТочки.pushbutton", u"script.py"),
             "low_voltage": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"06_Слаботочка.pushbutton", u"script.py"),
             "shdup": _os.path.join(extension_dir, u"EOM.tab", u"04_Розетки.panel", u"07_ШДУП.pushbutton", u"script.py"),
             "storage_rooms": _os.path.join(extension_dir, u"Разработка.tab", u"04_Розетки.panel", u"08_Кладовые.pushbutton", u"script.py"),
@@ -2420,7 +2420,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 

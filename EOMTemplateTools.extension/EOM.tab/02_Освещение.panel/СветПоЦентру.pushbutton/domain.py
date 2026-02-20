@@ -7,6 +7,24 @@ import constants
 
 SQFT_TO_SQM = 0.092903
 
+DEFAULT_APARTMENT_PARAM_NAMES = [
+    u'Квартира',
+    u'Номер квартиры',
+    u'ADSK_Номер квартиры',
+    u'ADSK_Номер_квартиры',
+    u'Apartment',
+    u'Flat',
+]
+
+INVALID_APARTMENT_NUMBERS = set([
+    u'квартира', u'apartment', u'flat', u'room', u'моп'
+])
+
+OUTSIDE_APARTMENT_KEYWORDS = [
+    u'внекварт', u'лестнич', u'подъезд', u'колясоч', u'моп', u'вестиб', u'лифтов',
+    u'тамбур', u'шлюз',
+]
+
 def _are_collinear(p1, p2, p3, tolerance=0.01):
     """Check if three points are collinear."""
     # Vector p1 -> p2
@@ -267,6 +285,146 @@ def room_name(room):
     return norm(val)
 
 
+def room_number(room):
+    val = get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_NUMBER)
+    if not val:
+        val = get_param_as_string(room, name='Number')
+    return val or u''
+
+
+def room_department(room):
+    val = get_param_as_string(room, bip=DB.BuiltInParameter.ROOM_DEPARTMENT)
+    if not val:
+        val = get_param_as_string(room, name='Department')
+    return val or u''
+
+
+def room_name_matches(room, patterns):
+    if room is None:
+        return False
+    text = room_name(room)
+    for p in (patterns or []):
+        token = norm(p)
+        if token and token in text:
+            return True
+    return False
+
+
+def clean_apartment_number(val):
+    if not val:
+        return u''
+    try:
+        txt = val.strip()
+    except Exception:
+        txt = val
+    try:
+        prefixes = [u'кв.', u'кв', u'apt.', u'apt', u'квартира']
+        low = txt.lower()
+        for pref in prefixes:
+            if low.startswith(pref):
+                txt = txt[len(pref):].strip()
+                break
+    except Exception:
+        pass
+    try:
+        return txt.upper()
+    except Exception:
+        return txt
+
+
+def is_valid_apartment_number(val):
+    if not val:
+        return False
+    v = norm(val)
+    if not v:
+        return False
+    if v in INVALID_APARTMENT_NUMBERS:
+        return False
+    return any(ch.isdigit() for ch in v)
+
+
+def get_room_apartment_number(room, param_names=None, allow_department=False, allow_number=False):
+    if room is None:
+        return None
+
+    names = list(param_names or DEFAULT_APARTMENT_PARAM_NAMES)
+    for pname in names:
+        try:
+            value = get_param_as_string(room, name=pname)
+            clean = clean_apartment_number(value)
+            if is_valid_apartment_number(clean):
+                return clean
+        except Exception:
+            continue
+
+    if allow_department:
+        try:
+            value = room_department(room)
+            clean = clean_apartment_number(value)
+            if is_valid_apartment_number(clean):
+                return clean
+        except Exception:
+            pass
+
+    if allow_number:
+        try:
+            value = room_number(room)
+            if value:
+                parts = value.split('.')
+                if parts and parts[0].isdigit():
+                    clean = clean_apartment_number(parts[0])
+                    if is_valid_apartment_number(clean):
+                        return clean
+        except Exception:
+            pass
+
+    return None
+
+
+def is_apartment_room(room,
+                      apartment_param_names=None,
+                      require_param=True,
+                      allow_department=False,
+                      allow_number=False,
+                      apartment_name_patterns=None,
+                      public_name_patterns=None):
+    """Return True only for apartment rooms."""
+    if room is None:
+        return False
+
+    name = room_name(room)
+    # Hard stop for clearly non-apartment zones, even when parameters are noisy.
+    for kw in OUTSIDE_APARTMENT_KEYWORDS:
+        token = norm(kw)
+        if token and token in name:
+            return False
+
+    apt_num = get_room_apartment_number(
+        room,
+        param_names=apartment_param_names,
+        allow_department=allow_department,
+        allow_number=allow_number,
+    )
+    if apt_num:
+        return True
+
+    if require_param:
+        return False
+
+    # With relaxed mode, still reject explicit public/common patterns.
+    for kw in (public_name_patterns or []):
+        token = norm(kw)
+        if token and token in name:
+            return False
+
+    # Optional soft fallback for projects without apartment parameters.
+    for kw in (apartment_name_patterns or []):
+        token = norm(kw)
+        if token and token in name:
+            return True
+    return False
+
+
 def is_corridor(room):
     """Check if room is a corridor/hallway/elevator hall/vestibule."""
     name = room_name(room).lower()
@@ -283,15 +441,29 @@ def is_wet_room(room):
     return is_bathroom(room) or is_toilet(room)
 
 
-def is_bathroom(room):
-    """Check if room is a Bathroom (has bath/shower)."""
-    if is_toilet(room):
-        return False
-    name = room_name(room).lower()
+def _is_bathroom_name(name):
     keywords = [
-        u'ванная', u'bath', u'shower', u'душевая'
+        u'ванная', u'ванн', u'bath', u'shower', u'душевая', u'душ'
     ]
     return any(k in name for k in keywords)
+
+
+def _is_toilet_name(name):
+    keywords = [
+        u'санузел', u'сан. узел', u'сан.узел', u'туалет', u'уборная',
+        u'с/у', u'с.у.', u'с.у',
+        u'toilet', u'wc', u'restroom'
+    ]
+    if any(k in name for k in keywords):
+        return True
+    # Fallback: check split "сан ... узел" wording.
+    return (u'сан' in name and u'узел' in name)
+
+
+def is_bathroom(room):
+    """Check if room is a Bathroom (has bath/shower)."""
+    name = room_name(room).lower()
+    return _is_bathroom_name(name)
 
 
 def is_toilet(room):
@@ -300,20 +472,12 @@ def is_toilet(room):
         raw_name = room_name(room).lower()
         # Normalize: remove weird spaces, standardise dots
         name = raw_name.replace(u'\xa0', u' ').replace(u'\u202f', u' ')
-        
-        keywords = [
-            u'санузел', u'сан. узел', u'сан.узел', u'туалет', u'уборная',
-            u'с/у', u'с.у.', u'с.у', 
-            u'toilet', u'wc', u'restroom'
-        ]
-        if any(k in name for k in keywords):
-            return True
-            
-        # Fallback: check parts (e.g. "сан" ... "узел")
-        if u'сан' in name and u'узел' in name:
-            return True
-            
-        return False
+
+        # "Санузел без ванной": if bath is present, classify as bathroom instead.
+        if _is_bathroom_name(name):
+            return False
+
+        return _is_toilet_name(name)
     except:
         return False
 
@@ -333,11 +497,16 @@ def is_excluded_room(room):
         u'кровля', u'roof',
 
         # Technical
+        u'внекварт',
+        u'колясоч',
+        u'моп',
         u'тбо',
         u'венткамер',
         u'помещение сс',
         u'технич',
         u'лестничн', # Stairwells
+        u'тамбур',
+        u'шлюз',
         u'форкамер',
         u'мусоросбор'
     ]
@@ -489,36 +658,10 @@ def get_room_centers_multi(room):
     """Return placement points.
 
     Logic:
-    - Corridors: Linear array (spacing ~2.5m / 8.2ft).
-    - L-shape (area > threshold): Two centers for the two rectangles.
-    - Others: Single center point.
+    - One room -> one point.
+    - Use robust room center calculation and avoid multi-point placements
+      because they often create duplicate fixtures in one room.
     """
-
-    if is_corridor(room):
-        pts = get_corridor_points(room)
-        if pts:
-            return pts
-        # Fallback to single center if linear calculation failed or room too small
-
-    # L-shape: two centers for large areas
-    try:
-        boundary_pts = _get_room_boundary_points(room)
-        if boundary_pts and len(boundary_pts) == 6:
-            area_sqm = _room_area_sqm(room)
-            threshold = getattr(constants, 'L_SHAPE_TWO_LIGHTS_AREA_M2', 10.0)
-            if area_sqm is not None and area_sqm > threshold:
-                fallback_z = 0.0
-                try:
-                    bb = room.get_BoundingBox(None)
-                    if bb:
-                        fallback_z = bb.Min.Z
-                except Exception:
-                    pass
-                l_pts = _get_l_shape_rect_centers(boundary_pts, fallback_z)
-                if l_pts:
-                    return l_pts
-    except Exception:
-        pass
 
     c = get_room_center_link(room)
     return [c] if c else []
@@ -547,8 +690,22 @@ def filter_duplicate_rooms(rooms):
     """Filter out rooms that are effectively duplicates (same location)."""
     unique_rooms = []
     seen_locs = []
+    seen_keys = set()
 
     for r in rooms:
+        # 1) Prefer deterministic key by level+number+name where possible.
+        try:
+            lvl = getattr(getattr(r, 'LevelId', None), 'IntegerValue', None)
+        except Exception:
+            lvl = None
+        num = norm(room_number(r))
+        nam = room_name(r)
+        if lvl is not None and num and nam:
+            key = (int(lvl), num, nam)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
         # Get center
         p = get_room_center_link(r)
         if not p:
@@ -556,7 +713,7 @@ def filter_duplicate_rooms(rooms):
 
         is_dup = False
         for sl in seen_locs:
-            if is_too_close(p, [sl], tolerance_ft=1.0):
+            if is_too_close(p, [sl], tolerance_ft=2.0):
                 is_dup = True
                 break
 

@@ -436,18 +436,9 @@ def _door_head_point_link(door):
     Returns:
         XYZ в координатах связи
     """
-    # Best: bounding box
-    try:
-        bb = door.get_BoundingBox(None)
-        if bb:
-            cx = (bb.Min.X + bb.Max.X) * 0.5
-            cy = (bb.Min.Y + bb.Max.Y) * 0.5
-            z = bb.Max.Z
-            return DB.XYZ(cx, cy, z)
-    except Exception:
-        pass
-
-    # Fallback: location + head height
+    # Prefer insertion point + head height.
+    # Some door families have oversized bbox in Z (symbolic/extra geometry), which shifts
+    # panel placement by one storey when using bb.Max.Z directly.
     try:
         loc = door.Location
         pt = loc.Point if loc and hasattr(loc, 'Point') else None
@@ -463,7 +454,20 @@ def _door_head_point_link(door):
         z = pt.Z + (float(head) if head else 0.0)
         return DB.XYZ(pt.X, pt.Y, z)
     except Exception:
-        return None
+        pass
+
+    # Fallback: bounding box
+    try:
+        bb = door.get_BoundingBox(None)
+        if bb:
+            cx = (bb.Min.X + bb.Max.X) * 0.5
+            cy = (bb.Min.Y + bb.Max.Y) * 0.5
+            z = bb.Max.Z
+            return DB.XYZ(cx, cy, z)
+    except Exception:
+        pass
+
+    return None
 
 
 def _door_center_point_link(door):
@@ -503,18 +507,12 @@ def _door_head_z_link(door):
     if door is None:
         return None
 
-    try:
-        bb = door.get_BoundingBox(None)
-        if bb:
-            return float(bb.Max.Z)
-    except Exception:
-        pass
-
+    # Prefer insertion point + head height.
     try:
         loc = getattr(door, 'Location', None)
         pt = loc.Point if loc and hasattr(loc, 'Point') else None
         if pt is None:
-            return None
+            raise Exception('Door has no location point')
         head = None
         try:
             p = door.get_Parameter(DB.BuiltInParameter.INSTANCE_HEAD_HEIGHT_PARAM)
@@ -526,7 +524,17 @@ def _door_head_z_link(door):
             return float(pt.Z)
         return float(pt.Z) + float(head)
     except Exception:
-        return None
+        pass
+
+    # Fallback: bounding box
+    try:
+        bb = door.get_BoundingBox(None)
+        if bb:
+            return float(bb.Max.Z)
+    except Exception:
+        pass
+
+    return None
 
 
 def _room_center_fast(room):

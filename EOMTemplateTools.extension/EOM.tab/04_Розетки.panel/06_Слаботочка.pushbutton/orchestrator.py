@@ -70,7 +70,15 @@ def run(doc, output):
     if not link_doc:
         return 0
 
-    rooms = adapters.get_all_linked_rooms(link_doc)
+    import link_reader
+    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни')
+    if not selected_levels:
+        return 0
+    level_ids = [lvl.Id for lvl in selected_levels if getattr(lvl, 'Id', None) is not None]
+    if not level_ids:
+        return 0
+
+    rooms = adapters.get_all_linked_rooms(link_doc, level_ids=level_ids)
     global LAST_ROOM_COUNT
     try:
         LAST_ROOM_COUNT = len(rooms)
@@ -1361,5 +1369,4 @@ def run(doc, output):
     output.print_md('## Результат')
     output.print_md('- Создано розеток (слаботочка): **{0}**'.format(placed_total))
     return int(placed_total or 0)
-
 

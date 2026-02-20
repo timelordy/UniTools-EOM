@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react'
+import { useReducer, useEffect, useCallback, useMemo, useRef, useId } from 'react'
 import ToolCard from './components/ToolCard'
 import TimeSavingsCounter from './components/TimeSavingsCounter'
 import ExecutionOverlay from './components/ExecutionOverlay'
@@ -8,106 +8,106 @@ import StatusBar from './components/StatusBar'
 declare global {
   interface Window {
     eel: {
-      get_tools_config(): () => Promise<ToolsConfig>;
-      get_revit_status(): () => Promise<RevitStatus>;
-      run_tool(toolId: string, jobId?: string): () => Promise<RunResult>;
-      get_job_result(jobId: string): () => Promise<JobResult | null>;
-      get_time_savings(): () => Promise<TimeSavings>;
-      add_time_saving(toolId: string, minutes: number | { min: number; max: number }): () => Promise<TimeSavings>;
-      reset_time_savings(): () => Promise<TimeSavings>;
-    };
+      get_tools_config(): () => Promise<ToolsConfig>
+      get_revit_status(): () => Promise<RevitStatus>
+      run_tool(toolId: string, jobId?: string): () => Promise<RunResult>
+      get_job_result(jobId: string): () => Promise<JobResult | null>
+      get_time_savings(): () => Promise<TimeSavings>
+      add_time_saving(toolId: string, minutes: number | { min: number; max: number }): () => Promise<TimeSavings>
+      reset_time_savings(): () => Promise<TimeSavings>
+    }
   }
 }
 
 interface Tool {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-  category: string;
-  time_saved: number; // fallback: minutes per run
-  script_path: string;
+  id: string
+  name: string
+  icon: string
+  description: string
+  category: string
+  time_saved: number // fallback: minutes per run
+  script_path: string
 }
 
 interface Category {
-  id: string;
-  name: string;
-  icon: string;
-  order: number;
+  id: string
+  name: string
+  icon: string
+  order: number
 }
 
 interface ToolsConfig {
-  tools: Record<string, Tool>;
-  categories: Record<string, Category>;
-  dangerous_tools?: string[];
-  warning_messages?: Record<string, string>;
+  tools: Record<string, Tool>
+  categories: Record<string, Category>
+  dangerous_tools?: string[]
+  warning_messages?: Record<string, string>
 }
 
 interface RevitStatus {
-  connected: boolean;
-  document?: string;
-  documentPath?: string;
-  revitVersion?: string;
-  sessionId?: string;
+  connected: boolean
+  document?: string
+  documentPath?: string
+  revitVersion?: string
+  sessionId?: string
 }
 
 interface RunResult {
-  success: boolean;
-  job_id?: string;
-  tool_id?: string;
-  message?: string;
-  error?: string;
+  success: boolean
+  job_id?: string
+  tool_id?: string
+  message?: string
+  error?: string
 }
 
 type JobStatus = 'idle' | 'pending' | 'running' | 'completed' | 'error' | 'cancelled'
 
 interface JobStats {
-  total: number;
-  processed: number;
-  skipped: number;
-  errors: number;
+  total: number
+  processed: number
+  skipped: number
+  errors: number
 }
 
 interface JobDetail {
-  id: string;
-  status: string;
-  message: string;
-  number?: string;
-  level?: string;
+  id: string
+  status: string
+  message: string
+  number?: string
+  level?: string
 }
 
 interface JobResult {
-  job_id: string;
-  tool_id: string;
-  status?: string;
-  message?: string;
-  error?: string;
-  executionTime?: number;
-  stats?: JobStats;
-  details?: JobDetail[];
-  summary?: Record<string, unknown>;
+  job_id: string
+  tool_id: string
+  status?: string
+  message?: string
+  error?: string
+  executionTime?: number
+  stats?: JobStats
+  details?: JobDetail[]
+  summary?: Record<string, unknown>
 }
 
 interface TimeSavings {
-  totalSeconds: number;
-  totalSecondsMin?: number;
-  totalSecondsMax?: number;
-  executed: Record<string, number>;
+  totalSeconds: number
+  totalSecondsMin?: number
+  totalSecondsMax?: number
+  executed: Record<string, number>
   history: Array<{
-    tool_id: string;
-    minutes: number;
-    minutes_min?: number;
-    minutes_max?: number;
-    timestamp: number;
-    time: string;
-  }>;
+    tool_id: string
+    minutes: number
+    minutes_min?: number
+    minutes_max?: number
+    timestamp: number
+    time: string
+  }>
 }
 
 type ConfirmVariant = 'default' | 'danger'
 
 type UxErrorContext = 'revit_not_ready' | 'run_dispatch' | 'job_poll' | 'cancel' | 'startup'
 
-export interface UxErrorInfo {
+interface UxErrorInfo {
   code: string
   title: string
   message: string
@@ -115,6 +115,8 @@ export interface UxErrorInfo {
   technicalMessage?: string
   canRetry: boolean
 }
+
+type ResultTab = 'result' | 'logs'
 
 interface ConfirmDialogState {
   title: string
@@ -360,51 +362,119 @@ const addTimeSaving = async (
   })
 }
 
-function App() {
-  const [config, setConfig] = useState<ToolsConfig | null>(null)
-  const [status, setStatus] = useState<RevitStatus>({ connected: false })
-  const [savings, setSavings] = useState<TimeSavings>({ totalSeconds: 0, executed: {}, history: [] })
+interface JobMeta {
+  toolId: string
+  minutes: number
+}
+
+interface AppState {
+  config: ToolsConfig | null
+  status: RevitStatus
+  savings: TimeSavings
+  pendingJobIds: string[]
+  jobMetaById: Record<string, JobMeta>
+  countedJobIds: Record<string, true>
+  jobDisplayNameById: Record<string, string>
+  activeCategory: string | null
+  showConnectionHelp: boolean
+  lastTool: Tool | null
+  lastJobId: string | null
+  jobStatus: JobStatus
+  jobResult: JobResult | null
+  jobMessage: string
+  uxError: UxErrorInfo | null
+  resultTab: ResultTab
+  overlayJobId: string | null
+  confirmDialog: ConfirmDialogState | null
+}
+
+type AppStateAction =
+  | { type: 'merge'; payload: Partial<AppState> }
+  | { type: 'update'; updater: (state: AppState) => AppState }
+
+const initialAppState: AppState = {
+  config: null,
+  status: { connected: false },
+  savings: { totalSeconds: 0, executed: {}, history: [] },
+  pendingJobIds: [],
+  jobMetaById: {},
+  countedJobIds: {},
+  jobDisplayNameById: {},
+  activeCategory: null,
+  showConnectionHelp: false,
+  lastTool: null,
+  lastJobId: null,
+  jobStatus: 'idle',
+  jobResult: null,
+  jobMessage: '',
+  uxError: null,
+  resultTab: 'result',
+  overlayJobId: null,
+  confirmDialog: null,
+}
+
+const appStateReducer = (state: AppState, action: AppStateAction): AppState => {
+  if (action.type === 'merge') {
+    return { ...state, ...action.payload }
+  }
+  return action.updater(state)
+}
+
+function useAppController() {
+  const [state, dispatch] = useReducer(appStateReducer, initialAppState)
   const configLoadedRef = useRef(false)
-  const [, setRunningTool] = useState<string | null>(null)
-  const [pendingJobIds, setPendingJobIds] = useState<string[]>([])
-  const [jobMetaById, setJobMetaById] = useState<Record<string, { toolId: string; minutes: number }>>({})
-  const [countedJobIds, setCountedJobIds] = useState<Record<string, true>>({})
-  const [jobDisplayNameById, setJobDisplayNameById] = useState<Record<string, string>>({})
   const jobRunCountersRef = useRef<Record<string, number>>({})
-  const [activeCategory, setActiveCategory] = useState<string | null>(null)
-  const [showConnectionHelp, setShowConnectionHelp] = useState(false)
-  const [lastTool, setLastTool] = useState<Tool | null>(null)
-  const [lastJobId, setLastJobId] = useState<string | null>(null)
-  const [jobStatus, setJobStatus] = useState<JobStatus>('idle')
-  const [jobResult, setJobResult] = useState<JobResult | null>(null)
-  const [jobMessage, setJobMessage] = useState<string>('')
-  const [uxError, setUxError] = useState<UxErrorInfo | null>(null)
-  const [resultTab, setResultTab] = useState<'result' | 'logs'>('result')
-  const [overlayJobId, setOverlayJobId] = useState<string | null>(null)
   const overlayHideTimerRef = useRef<number | null>(null)
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null)
   const confirmResolveRef = useRef<((value: boolean) => void) | null>(null)
+
+  const mergeState = useCallback((payload: Partial<AppState>) => {
+    dispatch({ type: 'merge', payload })
+  }, [])
+
+  const updateState = useCallback((updater: (current: AppState) => AppState) => {
+    dispatch({ type: 'update', updater })
+  }, [])
 
   const requestConfirm = useCallback((next: ConfirmDialogState) => {
     return new Promise<boolean>((resolve) => {
       confirmResolveRef.current = resolve
-      setConfirmDialog(next)
+      mergeState({ confirmDialog: next })
     })
-  }, [])
+  }, [mergeState])
 
   const closeConfirm = useCallback((value: boolean) => {
     const resolve = confirmResolveRef.current
     confirmResolveRef.current = null
-    setConfirmDialog(null)
+    mergeState({ confirmDialog: null })
     resolve?.(value)
-  }, [])
+  }, [mergeState])
 
   const setUxErrorFrom = useCallback((error: unknown, context: UxErrorContext): UxErrorInfo => {
     const mapped = mapUxError(error, context)
-    setUxError(mapped)
-    setJobMessage(mapped.message)
+    mergeState({ uxError: mapped, jobMessage: mapped.message })
     return mapped
-  }, [])
+  }, [mergeState])
+
+  const {
+    config,
+    status,
+    savings,
+    pendingJobIds,
+    jobMetaById,
+    countedJobIds,
+    jobDisplayNameById,
+    activeCategory,
+    showConnectionHelp,
+    lastTool,
+    lastJobId,
+    jobStatus,
+    jobResult,
+    jobMessage,
+    uxError,
+    resultTab,
+    overlayJobId,
+    confirmDialog,
+  } = state
 
   useEffect(() => {
     return () => {
@@ -414,49 +484,48 @@ function App() {
     }
   }, [])
 
-  // Load config and status
+  useEffect(() => {
+    return () => {
+      if (overlayHideTimerRef.current != null) {
+        window.clearTimeout(overlayHideTimerRef.current)
+        overlayHideTimerRef.current = null
+      }
+    }
+  }, [])
+
+  // Load config and status.
   useEffect(() => {
     const loadData = async () => {
       try {
-        const cfg = await getToolsConfig()
-        setConfig(cfg)
+        const [cfg, st, sv] = await Promise.all([getToolsConfig(), getRevitStatus(), getTimeSavings()])
         configLoadedRef.current = true
-
-        const st = await getRevitStatus()
-        setStatus(st)
-
-        const sv = await getTimeSavings()
-        setSavings(sv)
+        mergeState({ config: cfg, status: st, savings: sv })
       } catch (e) {
         console.error('Failed to load data:', e)
-        setJobStatus('error')
+        mergeState({ jobStatus: 'error' })
         setUxErrorFrom(e, 'startup')
       }
     }
 
-    loadData()
+    void loadData()
 
-    // Poll status every 5 seconds
-    const interval = setInterval(async () => {
+    const interval = window.setInterval(async () => {
       try {
         if (!configLoadedRef.current) {
-          const cfg = await getToolsConfig()
-          setConfig(cfg)
+          const [cfg, sv] = await Promise.all([getToolsConfig(), getTimeSavings()])
           configLoadedRef.current = true
-
-          const sv = await getTimeSavings()
-          setSavings(sv)
+          mergeState({ config: cfg, savings: sv })
         }
 
         const st = await getRevitStatus()
-        setStatus(st)
+        mergeState({ status: st })
       } catch {
         // ignore
       }
     }, 5000)
 
-    return () => clearInterval(interval)
-  }, [])
+    return () => window.clearInterval(interval)
+  }, [mergeState, setUxErrorFrom])
 
   // Poll all queued jobs so tools are independent.
   useEffect(() => {
@@ -474,40 +543,55 @@ function App() {
             try {
               const res = await getJobResult(jobId)
               return { jobId, res }
-            } catch (e) {
-              return { jobId, res: { job_id: jobId, tool_id: '', status: 'error', error: (e as Error).message } as JobResult }
+            } catch (error) {
+              return {
+                jobId,
+                res: {
+                  job_id: jobId,
+                  tool_id: '',
+                  status: 'error',
+                  error: (error as Error).message,
+                } as JobResult,
+              }
             }
-          })
+          }),
         )
 
         for (const { jobId, res } of results) {
           if (!res) continue
 
-          const status = (res.status as JobStatus) || 'completed'
-          const isTerminal = status === 'completed' || status === 'error' || status === 'cancelled'
+          const nextStatus = (res.status as JobStatus) || 'completed'
+          const isTerminal = nextStatus === 'completed' || nextStatus === 'error' || nextStatus === 'cancelled'
 
-          // Update main result panel for the last selected job.
           if (jobId === lastJobId) {
-            setJobResult(res)
-            setJobStatus(status)
+            updateState((current) => {
+              if (current.lastJobId !== jobId) return current
 
-            if (status === 'error') {
-              setUxErrorFrom(res.error || res.message || `Задача ${jobId} завершилась с ошибкой`, 'job_poll')
-            } else if (status === 'cancelled') {
-              setUxErrorFrom(res.error || res.message || 'cancelled', 'job_poll')
-            } else {
-              setUxError(null)
-              if (res.message) setJobMessage(res.message)
-              else if (res.error) setJobMessage(res.error)
-            }
+              const next: AppState = {
+                ...current,
+                jobResult: res,
+                jobStatus: nextStatus,
+              }
 
-            if (isTerminal) {
-              setRunningTool(null)
-            }
+              if (nextStatus === 'error') {
+                const mapped = mapUxError(res.error || res.message || `Задача ${jobId} завершилась с ошибкой`, 'job_poll')
+                next.uxError = mapped
+                next.jobMessage = mapped.message
+              } else if (nextStatus === 'cancelled') {
+                const mapped = mapUxError(res.error || res.message || 'cancelled', 'job_poll')
+                next.uxError = mapped
+                next.jobMessage = mapped.message
+              } else {
+                next.uxError = null
+                if (res.message) next.jobMessage = res.message
+                else if (res.error) next.jobMessage = res.error
+              }
+
+              return next
+            })
           }
 
-          // Count time savings ONLY after completion, once.
-          if (status === 'completed' && !countedJobIds[jobId]) {
+          if (nextStatus === 'completed' && !countedJobIds[jobId]) {
             const meta = jobMetaById[jobId]
             const summary =
               res.summary as
@@ -535,7 +619,7 @@ function App() {
             if (minutesMin == null && minutesMax != null) minutesMin = minutesMax
             if (minutesMax == null && minutesMin != null) minutesMax = minutesMin
 
-            let toolIdForSaving: string | null = meta?.toolId || res.tool_id || null
+            const toolIdForSaving = meta?.toolId || res.tool_id || null
 
             // Fallback: treat tool.time_saved as per-run minutes.
             if ((minutesMin == null || minutesMax == null) && meta) {
@@ -546,25 +630,45 @@ function App() {
             if (minutesMin != null && minutesMax != null && minutesMax > 0 && toolIdForSaving) {
               try {
                 const newSavings = await addTimeSaving(toolIdForSaving, { min: minutesMin, max: minutesMax })
-                setSavings(newSavings)
+                mergeState({ savings: newSavings })
               } catch {
                 // ignore
               }
             }
 
-            setCountedJobIds((prev) => ({ ...prev, [jobId]: true }))
+            updateState((current) => {
+              if (current.countedJobIds[jobId]) return current
+              return {
+                ...current,
+                countedJobIds: { ...current.countedJobIds, [jobId]: true },
+              }
+            })
           }
 
           if (isTerminal) {
-            setPendingJobIds((prev) => prev.filter((x) => x !== jobId))
-            setJobMetaById((prev) => {
-              if (!prev[jobId]) return prev
-              const next = { ...prev }
-              delete next[jobId]
-              return next
+            updateState((current) => {
+              const nextPending = current.pendingJobIds.filter((id) => id !== jobId)
+              if (!current.jobMetaById[jobId] && nextPending.length === current.pendingJobIds.length) {
+                return current
+              }
+
+              const nextJobMeta = { ...current.jobMetaById }
+              delete nextJobMeta[jobId]
+
+              return {
+                ...current,
+                pendingJobIds: nextPending,
+                jobMetaById: nextJobMeta,
+              }
             })
           } else {
-            setPendingJobIds((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]))
+            updateState((current) => {
+              if (current.pendingJobIds.includes(jobId)) return current
+              return {
+                ...current,
+                pendingJobIds: [...current.pendingJobIds, jobId],
+              }
+            })
           }
         }
       } catch {
@@ -581,7 +685,7 @@ function App() {
       stopped = true
       window.clearInterval(timer)
     }
-  }, [pendingJobIds, lastJobId, countedJobIds, jobMetaById, setUxErrorFrom])
+  }, [pendingJobIds, lastJobId, countedJobIds, jobMetaById, mergeState, updateState])
 
   const runningToolIds = useMemo(() => {
     const ids = new Set<string>()
@@ -610,57 +714,46 @@ function App() {
       overlayHideTimerRef.current = null
     }
 
+    let nextOverlayId: string | null = null
     if (jobStatus === 'error' && uxError) {
-      setOverlayJobId('__ux_error__')
-      return
+      nextOverlayId = '__ux_error__'
+    } else if (lastTool && lastJobId && (jobStatus === 'pending' || jobStatus === 'running' || jobStatus === 'completed')) {
+      nextOverlayId = lastJobId
     }
 
-    if (!lastTool || !lastJobId) {
-      setOverlayJobId(null)
-      return
-    }
+    mergeState({ overlayJobId: nextOverlayId })
 
-    if (jobStatus === 'pending' || jobStatus === 'running') {
-      setOverlayJobId(lastJobId)
-      return
-    }
-
-    if (jobStatus === 'completed') {
-      setOverlayJobId(lastJobId)
+    if (jobStatus === 'completed' && lastTool && lastJobId) {
       overlayHideTimerRef.current = window.setTimeout(() => {
-        setOverlayJobId((current) => (current === lastJobId ? null : current))
+        updateState((current) => {
+          if (current.overlayJobId !== lastJobId) return current
+          return { ...current, overlayJobId: null }
+        })
         overlayHideTimerRef.current = null
       }, 1300)
-      return
     }
-
-    // Default: don't show overlay for other states.
-    setOverlayJobId(null)
-  }, [jobStatus, lastJobId, lastTool, uxError])
-
-  const overlayVisible = Boolean(
-    (jobStatus === 'error' && uxError) || (lastTool && lastJobId && overlayJobId && overlayJobId === lastJobId)
-  )
+  }, [jobStatus, lastJobId, lastTool, uxError, mergeState, updateState])
 
   useEffect(() => {
-    if (status.connected) {
-      setShowConnectionHelp(false)
+    if (status.connected && showConnectionHelp) {
+      mergeState({ showConnectionHelp: false })
     }
-  }, [status.connected])
+  }, [status.connected, showConnectionHelp, mergeState])
 
   const handleRunTool = useCallback(async (tool: Tool) => {
     if (!status.connected) {
-      setLastTool(tool)
-      setLastJobId(null)
-      setJobResult(null)
-      setJobStatus('error')
+      mergeState({
+        lastTool: tool,
+        lastJobId: null,
+        jobResult: null,
+        jobStatus: 'error',
+        showConnectionHelp: true,
+        resultTab: 'result',
+      })
       setUxErrorFrom(null, 'revit_not_ready')
-      setShowConnectionHelp(true)
-      setResultTab('result')
       return
     }
 
-    // Check for dangerous tools
     if (config?.dangerous_tools?.includes(tool.id)) {
       const msg = config.warning_messages?.[tool.id] || config.warning_messages?.default || 'Продолжить?'
       const ok = await requestConfirm({
@@ -674,48 +767,57 @@ function App() {
       if (!ok) return
     }
 
-    // Запуск не блокирует другие инструменты: можно ставить в очередь несколько задач.
-    setRunningTool(tool.id)
-    setLastTool(tool)
-    setLastJobId(null) // Сбрасываем старый job_id
-    setJobResult(null)
-    setJobMessage('')
-    setUxError(null)
-    setJobStatus('pending')
-    setResultTab('result')
+    mergeState({
+      lastTool: tool,
+      lastJobId: null,
+      jobResult: null,
+      jobMessage: '',
+      uxError: null,
+      jobStatus: 'pending',
+      resultTab: 'result',
+    })
 
     try {
       const result = await runTool(tool.id)
 
       if (result.success) {
-        setUxError(null)
-        setLastJobId(result.job_id || null)
-        setJobMessage(result.message || 'Команда отправлена в Revit')
+        mergeState({
+          uxError: null,
+          lastJobId: result.job_id || null,
+          jobMessage: result.message || 'Команда отправлена в Revit',
+        })
+
         const jobId = result.job_id
         if (jobId) {
-          setPendingJobIds((prev) => (prev.includes(jobId) ? prev : [...prev, jobId]))
-          setJobMetaById((prev) => ({ ...prev, [jobId]: { toolId: tool.id, minutes: tool.time_saved } }))
           const baseName = tool.name?.trim() || 'Задача'
           const prevCount = jobRunCountersRef.current[tool.id] || 0
           const nextCount = prevCount + 1
           jobRunCountersRef.current = { ...jobRunCountersRef.current, [tool.id]: nextCount }
           const computedFriendlyName = `${baseName}_${nextCount}`
-          setJobDisplayNameById((prev) => ({ ...prev, [jobId]: computedFriendlyName }))
+
+          updateState((current) => ({
+            ...current,
+            pendingJobIds: current.pendingJobIds.includes(jobId) ? current.pendingJobIds : [...current.pendingJobIds, jobId],
+            jobMetaById: {
+              ...current.jobMetaById,
+              [jobId]: { toolId: tool.id, minutes: tool.time_saved },
+            },
+            jobDisplayNameById: {
+              ...current.jobDisplayNameById,
+              [jobId]: computedFriendlyName,
+            },
+          }))
         }
       } else {
-        setLastJobId(null)
-        setJobStatus('error')
+        mergeState({ lastJobId: null, jobStatus: 'error' })
         setUxErrorFrom(result.error || result.message || 'Не удалось отправить команду в Revit', 'run_dispatch')
-        setRunningTool(null)
       }
-    } catch (e) {
-      console.error('Failed to run tool:', e)
-      setLastJobId(null)
-      setJobStatus('error')
-      setUxErrorFrom(e, 'run_dispatch')
-      setRunningTool(null)
+    } catch (error) {
+      console.error('Failed to run tool:', error)
+      mergeState({ lastJobId: null, jobStatus: 'error' })
+      setUxErrorFrom(error, 'run_dispatch')
     }
-  }, [config, requestConfirm, setUxErrorFrom, status.connected])
+  }, [config, mergeState, requestConfirm, setUxErrorFrom, status.connected, updateState])
 
   const handleResetSavings = useCallback(async () => {
     const ok = await requestConfirm({
@@ -730,49 +832,51 @@ function App() {
 
     try {
       const newSavings = await resetTimeSavings()
-      setSavings(newSavings)
-    } catch (e) {
-      console.error('Failed to reset savings:', e)
-      setJobStatus('error')
-      setUxErrorFrom(e, 'startup')
+      mergeState({ savings: newSavings })
+    } catch (error) {
+      console.error('Failed to reset savings:', error)
+      mergeState({ jobStatus: 'error' })
+      setUxErrorFrom(error, 'startup')
     }
-  }, [requestConfirm, setUxErrorFrom])
+  }, [mergeState, requestConfirm, setUxErrorFrom])
 
   const handleCancel = useCallback(async () => {
     if (!jobStatus || jobStatus === 'completed' || jobStatus === 'error' || jobStatus === 'cancelled') return
 
     try {
-      // Send cancel command with current job ID if available, or just generic cancel
-      // Based on script.py logic, "run:cancel:jobId" is handled.
-      // run_tool('cancel', lastJobId) -> "run:cancel:lastJobId"
       if (lastJobId) {
         await runTool('cancel', lastJobId)
       } else {
         await runTool('cancel')
       }
-      setUxError(null)
-      setJobMessage('Запрос на отмену отправлен...')
-    } catch (e) {
-      console.error('Failed to cancel:', e)
-      setJobStatus('error')
-      setUxErrorFrom(e, 'cancel')
+      mergeState({ uxError: null, jobMessage: 'Запрос на отмену отправлен...' })
+    } catch (error) {
+      console.error('Failed to cancel:', error)
+      mergeState({ jobStatus: 'error' })
+      setUxErrorFrom(error, 'cancel')
     }
-  }, [jobStatus, lastJobId, setUxErrorFrom])
+  }, [jobStatus, lastJobId, mergeState, setUxErrorFrom])
 
-  // Group tools by category
-  const toolsByCategory = config ? Object.values(config.tools).reduce((acc, tool) => {
-    if (!acc[tool.category]) acc[tool.category] = []
-    acc[tool.category].push(tool)
-    return acc
-  }, {} as Record<string, Tool[]>) : {}
+  const toolsByCategory = useMemo(() => {
+    if (!config) return {} as Record<string, Tool[]>
 
-  // Sort categories by order
-  const sortedCategories = config ? Object.values(config.categories).sort((a, b) => a.order - b.order) : []
+    return Object.values(config.tools).reduce((acc, tool) => {
+      if (!acc[tool.category]) acc[tool.category] = []
+      acc[tool.category].push(tool)
+      return acc
+    }, {} as Record<string, Tool[]>)
+  }, [config])
 
-  // Filter tools by active category
-  const filteredCategories = activeCategory
-    ? sortedCategories.filter(c => c.id === activeCategory)
-    : sortedCategories
+  const sortedCategories = useMemo(() => {
+    if (!config) return [] as Category[]
+    return Object.values(config.categories).sort((a, b) => a.order - b.order)
+  }, [config])
+
+  const filteredCategories = useMemo(() => {
+    return activeCategory
+      ? sortedCategories.filter((category) => category.id === activeCategory)
+      : sortedCategories
+  }, [activeCategory, sortedCategories])
 
   const jobStatusLabel = useMemo(() => {
     switch (jobStatus) {
@@ -796,9 +900,10 @@ function App() {
     const details = jobResult?.details || []
     if (!details.length) return null
 
-    const processed = details.filter(d => d.status === 'success').length
-    const skipped = details.filter(d => d.status === 'skipped').length
-    const errors = details.filter(d => d.status === 'error').length
+    const processed = details.filter((detail) => detail.status === 'success').length
+    const skipped = details.filter((detail) => detail.status === 'skipped').length
+    const errors = details.filter((detail) => detail.status === 'error').length
+
     return {
       total: details.length,
       processed,
@@ -808,6 +913,91 @@ function App() {
   }, [jobResult])
 
   const hasLogs = Boolean(jobResult?.details && jobResult.details.length)
+
+  const setActiveCategory = useCallback((categoryId: string | null) => {
+    mergeState({ activeCategory: categoryId })
+  }, [mergeState])
+
+  const toggleConnectionHelp = useCallback(() => {
+    updateState((current) => ({
+      ...current,
+      showConnectionHelp: !current.showConnectionHelp,
+    }))
+  }, [updateState])
+
+  const setResultTab = useCallback((tab: ResultTab) => {
+    mergeState({ resultTab: tab })
+  }, [mergeState])
+
+  const overlayVisible = Boolean(
+    (jobStatus === 'error' && uxError) || (lastTool && lastJobId && overlayJobId && overlayJobId === lastJobId),
+  )
+
+  return {
+    activeCategory,
+    closeConfirm,
+    confirmDialog,
+    filteredCategories,
+    friendlyJobName,
+    handleCancel,
+    handleResetSavings,
+    handleRunTool,
+    hasLogs,
+    jobMessage,
+    jobResult,
+    jobStatus,
+    jobStatusLabel,
+    lastJobId,
+    lastTool,
+    overlayVisible,
+    queueLabel,
+    resolvedStats,
+    resultTab,
+    runningToolIds,
+    savings,
+    setActiveCategory,
+    setResultTab,
+    showConnectionHelp,
+    sortedCategories,
+    status,
+    toggleConnectionHelp,
+    toolsByCategory,
+    uxError,
+  }
+}
+
+function App() {
+  const {
+    activeCategory,
+    closeConfirm,
+    confirmDialog,
+    filteredCategories,
+    friendlyJobName,
+    handleCancel,
+    handleResetSavings,
+    handleRunTool,
+    hasLogs,
+    jobMessage,
+    jobResult,
+    jobStatus,
+    jobStatusLabel,
+    lastJobId,
+    lastTool,
+    overlayVisible,
+    queueLabel,
+    resolvedStats,
+    resultTab,
+    runningToolIds,
+    savings,
+    setActiveCategory,
+    setResultTab,
+    showConnectionHelp,
+    sortedCategories,
+    status,
+    toggleConnectionHelp,
+    toolsByCategory,
+    uxError,
+  } = useAppController()
 
   return (
     <div className="app">
@@ -832,7 +1022,7 @@ function App() {
           >
             Все
           </button>
-          {sortedCategories.map(cat => (
+          {sortedCategories.map((cat) => (
             <button
               key={cat.id}
               className={`tab ${activeCategory === cat.id ? 'active' : ''}`}
@@ -850,7 +1040,7 @@ function App() {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              onClick={() => setShowConnectionHelp((prev) => !prev)}
+              onClick={toggleConnectionHelp}
             >
               {showConnectionHelp ? 'Скрыть инструкцию' : 'Как подключиться'}
             </button>
@@ -865,7 +1055,7 @@ function App() {
         )}
 
         <div className="tools-container">
-          {filteredCategories.map(category => (
+          {filteredCategories.map((category) => (
             <section key={category.id} className="category-section">
               <h2 className="category-title">
                 <span className="category-icon">{category.icon}</span>
@@ -873,7 +1063,7 @@ function App() {
                 <span className="category-count">{toolsByCategory[category.id]?.length || 0}</span>
               </h2>
               <div className="tools-grid">
-                {toolsByCategory[category.id]?.map(tool => (
+                {toolsByCategory[category.id]?.map((tool) => (
                   <ToolCard
                     key={tool.id}
                     tool={tool}
@@ -888,126 +1078,117 @@ function App() {
           ))}
         </div>
 
-	    {SHOW_RESULT_PANEL && (
-	      <section className="result-panel">
-          <div className="result-header">
-            <div className="result-title">
-              <span>Результат запуска</span>
-              {lastTool && <span className="result-tool">{lastTool.name}</span>}
-            </div>
-            <div className="result-header-actions">
-              <div className={`result-status status-${jobStatus}`}>
-                {jobStatusLabel}
+        {SHOW_RESULT_PANEL && (
+          <section className="result-panel">
+            <div className="result-header">
+              <div className="result-title">
+                <span>Результат запуска</span>
+                {lastTool && <span className="result-tool">{lastTool.name}</span>}
               </div>
-              {(jobStatus === 'running' || jobStatus === 'pending') && (
-                <button
-                  type="button"
-                  className="btn btn-danger btn-sm"
-                  onClick={handleCancel}
-                  title="Отменить выполнение"
-                >
-                  ОТМЕНА
-                </button>
-              )}
+              <div className="result-header-actions">
+                <div className={`result-status status-${jobStatus}`}>{jobStatusLabel}</div>
+                {(jobStatus === 'running' || jobStatus === 'pending') && (
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    onClick={handleCancel}
+                    title="Отменить выполнение"
+                  >
+                    ОТМЕНА
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
 
-          {!lastJobId && (
-            <div className="result-empty">
-              Запустите инструмент, чтобы увидеть результат.
-            </div>
-          )}
+            {!lastJobId && <div className="result-empty">Запустите инструмент, чтобы увидеть результат.</div>}
 
-          {lastJobId && (
-            <>
-              <div className="result-meta">
-                <span className="result-meta-item" title={lastJobId || undefined}>Задача: {friendlyJobName || lastJobId}</span>
-                {jobResult?.executionTime != null && (
-                  <span className="result-meta-item" style={{ fontWeight: 'bold', color: '#4CAF50' }}>
-                    ⏱ Время: {Math.round(jobResult.executionTime * 10) / 10} сек
+            {lastJobId && (
+              <>
+                <div className="result-meta">
+                  <span className="result-meta-item" title={lastJobId || undefined}>
+                    Задача: {friendlyJobName || lastJobId}
                   </span>
-                )}
-              </div>
-
-              {(jobMessage || jobStatus === 'running') && (
-                <div className="result-message">
-                  {jobMessage || 'Ожидание ответа от Revit...'}
+                  {jobResult?.executionTime != null && (
+                    <span className="result-meta-item" style={{ fontWeight: 'bold', color: '#4CAF50' }}>
+                      ⏱ Время: {Math.round(jobResult.executionTime * 10) / 10} сек
+                    </span>
+                  )}
                 </div>
-              )}
 
-              <div className="result-tabs">
-                <button
-                  className={`result-tab ${resultTab === 'result' ? 'active' : ''}`}
-                  onClick={() => setResultTab('result')}
-                >
-                  Результат
-                </button>
-                <button
-                  className={`result-tab ${resultTab === 'logs' ? 'active' : ''}`}
-                  onClick={() => setResultTab('logs')}
-                >
-                  Логи
-                </button>
-              </div>
-
-              <div className="result-body">
-                {resultTab === 'result' ? (
-                  <>
-                    {resolvedStats ? (
-                      <div className="result-stats">
-                        <div className="result-stat">
-                          <span className="stat-label">Всего</span>
-                          <span className="stat-value">{resolvedStats.total}</span>
-                        </div>
-                        <div className="result-stat success">
-                          <span className="stat-label">Успешно</span>
-                          <span className="stat-value">{resolvedStats.processed}</span>
-                        </div>
-                        <div className="result-stat warning">
-                          <span className="stat-label">Пропущено</span>
-                          <span className="stat-value">{resolvedStats.skipped}</span>
-                        </div>
-                        <div className="result-stat error">
-                          <span className="stat-label">Ошибки</span>
-                          <span className="stat-value">{resolvedStats.errors}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="result-empty">Данных по результату пока нет.</div>
-                    )}
-
-                    {jobResult?.summary && (
-                      <pre className="result-summary">
-                        {JSON.stringify(jobResult.summary, null, 2)}
-                      </pre>
-                    )}
-
-                    {jobStatus === 'error' && (
-                      <div className="result-error">{uxError?.message || jobResult?.error || jobMessage}</div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {hasLogs ? (
-                      <div className="log-list">
-                        {jobResult?.details?.map((detail, index) => (
-                          <div key={detail.id || index} className={`log-item ${detail.status}`}>
-                            <span className="log-status">{detail.status}</span>
-                            <span className="log-message">{detail.message}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="result-empty">Логи пока пусты.</div>
-                    )}
-                  </>
+                {(jobMessage || jobStatus === 'running') && (
+                  <div className="result-message">{jobMessage || 'Ожидание ответа от Revit...'}</div>
                 )}
-              </div>
-            </>
-          )}
-	      </section>
-	    )}
-	  </main>
+
+                <div className="result-tabs">
+                  <button
+                    className={`result-tab ${resultTab === 'result' ? 'active' : ''}`}
+                    onClick={() => setResultTab('result')}
+                  >
+                    Результат
+                  </button>
+                  <button
+                    className={`result-tab ${resultTab === 'logs' ? 'active' : ''}`}
+                    onClick={() => setResultTab('logs')}
+                  >
+                    Логи
+                  </button>
+                </div>
+
+                <div className="result-body">
+                  {resultTab === 'result' ? (
+                    <>
+                      {resolvedStats ? (
+                        <div className="result-stats">
+                          <div className="result-stat">
+                            <span className="stat-label">Всего</span>
+                            <span className="stat-value">{resolvedStats.total}</span>
+                          </div>
+                          <div className="result-stat success">
+                            <span className="stat-label">Успешно</span>
+                            <span className="stat-value">{resolvedStats.processed}</span>
+                          </div>
+                          <div className="result-stat warning">
+                            <span className="stat-label">Пропущено</span>
+                            <span className="stat-value">{resolvedStats.skipped}</span>
+                          </div>
+                          <div className="result-stat error">
+                            <span className="stat-label">Ошибки</span>
+                            <span className="stat-value">{resolvedStats.errors}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="result-empty">Данных по результату пока нет.</div>
+                      )}
+
+                      {jobResult?.summary && <pre className="result-summary">{JSON.stringify(jobResult.summary, null, 2)}</pre>}
+
+                      {jobStatus === 'error' && (
+                        <div className="result-error">{uxError?.message || jobResult?.error || jobMessage}</div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {hasLogs ? (
+                        <div className="log-list">
+                          {jobResult?.details?.map((detail, index) => (
+                            <div key={detail.id || index} className={`log-item ${detail.status}`}>
+                              <span className="log-status">{detail.status}</span>
+                              <span className="log-message">{detail.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="result-empty">Логи пока пусты.</div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+      </main>
+
       <ExecutionOverlay
         visible={overlayVisible}
         status={jobStatus}
@@ -1105,14 +1286,19 @@ function ConfirmDialog({
   const isDanger = variant === 'danger'
 
   return (
-    <div className="apply-progress-overlay confirm-overlay" onClick={onCancel}>
+    <div className="apply-progress-overlay confirm-overlay">
+      <button
+        type="button"
+        className="confirm-overlay-backdrop"
+        onClick={onCancel}
+        aria-label="Закрыть окно подтверждения"
+      />
       <div
         className="apply-progress-dialog confirm-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={messageId}
-        onClick={(e) => e.stopPropagation()}
       >
         <div id={titleId} className="confirm-title">
           {isDanger ? <span className="confirm-icon" aria-hidden="true">⚠</span> : null}

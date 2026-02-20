@@ -1271,7 +1271,19 @@ button:focus-visible,
   background: rgba(15, 23, 42, 0.4);
 }
 
+.confirm-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
 .confirm-dialog {
+  position: relative;
+  z-index: 1;
   width: min(500px, calc(100% - 32px));
   border-radius: 16px;
   padding: 20px;
@@ -1341,4 +1353,3 @@ button:focus-visible,
     transform: translateX(100%);
   }
 }
-

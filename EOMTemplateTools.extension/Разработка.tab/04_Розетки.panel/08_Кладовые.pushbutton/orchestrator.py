@@ -4,6 +4,7 @@ import math
 import re
 from pyrevit import DB, forms, script
 import link_reader
+import magic_context
 import adapters
 import constants
 import domain
@@ -112,12 +113,36 @@ def run(doc, output):
     except Exception:
         pass
 
-    link_inst = link_reader.select_link_instance(doc)
+    force_selection = bool(getattr(magic_context, 'FORCE_SELECTION', False))
+    link_inst = getattr(magic_context, 'SELECTED_LINK', None) if force_selection else None
+    if link_inst is None:
+        link_inst = link_reader.select_link_instance(doc)
     if not link_inst:
-        return
+        return {}
     link_doc = adapters.get_link_doc(link_inst)
     if not link_doc:
-        return
+        return {}
+
+    selected_levels = list(getattr(magic_context, 'SELECTED_LEVELS', []) or []) if force_selection else []
+    if not selected_levels:
+        selected_levels = link_reader.select_levels_multi(
+            link_doc,
+            title=u'Выберите уровни для обработки',
+            default_all=False
+        )
+    if not selected_levels:
+        output.print_md('**Отменено (уровни не выбраны).**')
+        return {}
+
+    selected_level_ids = set()
+    for lvl in selected_levels:
+        try:
+            selected_level_ids.add(int(lvl.Id.IntegerValue))
+        except Exception:
+            continue
+    if not selected_level_ids:
+        output.print_md('**Отменено (уровни не выбраны).**')
+        return {}
 
     t = adapters.get_total_transform(link_inst)
 
@@ -127,6 +152,11 @@ def run(doc, output):
     rooms = []
     for r in raw_rooms:
         try:
+            try:
+                if int(r.LevelId.IntegerValue) not in selected_level_ids:
+                    continue
+            except Exception:
+                continue
             if storage_rx and (not match_any(storage_rx, room_text(r))):
                 continue
             rooms.append(r)
@@ -135,7 +165,7 @@ def run(doc, output):
 
     if not rooms:
         alert('Не найдено помещений кладовых (по паттернам).')
-        return
+        return {}
 
     output.print_md('Найдено помещений кладовых: **{0}** (из {1} всего отсканировано)'.format(
         len(rooms), len(raw_rooms)

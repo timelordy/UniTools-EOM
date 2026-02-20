@@ -204,7 +204,7 @@ def main():
         link_title=u'Выберите связь(и) АР',
         level_title=u'Выберите этаж(и) для обработки',
         default_all_links=True,
-        default_all_levels=True,
+        default_all_levels=False,
         loaded_only=True
     )
     if not selected_pairs:

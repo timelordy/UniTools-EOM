@@ -3,6 +3,7 @@
 from pyrevit import DB, forms
 import config_loader
 import link_reader
+import magic_context
 import placement_engine
 from utils_revit import alert, set_comments, tx, trace
 from utils_units import mm_to_ft
@@ -533,7 +534,10 @@ def run_placement(doc, output, script_module):
     outside_offset_ft = mm_to_ft(outside_offset_mm) or 0.0
     dedupe_ft = mm_to_ft(dedupe_mm) or 0.0
 
-    link_inst = select_link_instance_ru(doc, title='Выберите связь АР')
+    force_selection = bool(getattr(magic_context, 'FORCE_SELECTION', False))
+    link_inst = getattr(magic_context, 'SELECTED_LINK', None) if force_selection else None
+    if link_inst is None:
+        link_inst = select_link_instance_ru(doc, title='Выберите связь АР')
     if link_inst is None:
         output.print_md('**Отменено.**')
         return
@@ -546,9 +550,15 @@ def run_placement(doc, output, script_module):
         alert('Не удалось получить доступ к документу связи.')
         return
 
-    selected_levels = link_reader.list_levels(link_doc)
+    selected_levels = list(getattr(magic_context, 'SELECTED_LEVELS', []) or []) if force_selection else []
     if not selected_levels:
-        output.print_md('**Нет уровней в связанном файле.**')
+        selected_levels = link_reader.select_levels_multi(
+            link_doc,
+            title=u'Выберите уровни для обработки',
+            default_all=False
+        )
+    if not selected_levels:
+        output.print_md('**Отменено (уровни не выбраны).**')
         return
 
     level_ids = []
@@ -748,3 +758,4 @@ def run_placement(doc, output, script_module):
     output.print_md('Есть обе стороны: **{0}**'.format(counts['both_sides']))
     output.print_md('Размещено светильников: **{0}**'.format(counts['placed']))
     output.print_md('Пропущено: **{0}**'.format(counts['skipped']))
+    return counts

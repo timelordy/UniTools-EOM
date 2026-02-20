@@ -259,13 +259,17 @@ def main():
     output.print_md("# 🔌 AC Socket Placement v3.0 (Ralph)")
     output.print_md("_Strict Perpendicular / Side Wall Logic_")
     
-    # 1. Select Links
-    link_inst = link_reader.select_link_instance_auto(doc)
-    if not link_inst:
-        output.print_md("❌ No loaded links found.")
+    selected_pairs = link_reader.select_link_level_pairs(
+        doc,
+        link_title=u'Выберите связь(и) АР',
+        level_title=u'Выберите уровни для обработки',
+        default_all_links=True,
+        default_all_levels=False,
+        loaded_only=True
+    )
+    if not selected_pairs:
+        output.print_md("❌ Отменено: связи/уровни не выбраны.")
         return
-        
-    link_insts = [link_inst]
         
     # 2. Load Config (for socket type)
     rules = config_loader.load_rules()
@@ -294,13 +298,24 @@ def main():
     
     # 3. Process
     with utils_revit.tx("AC Sockets Placement"):
-        for link_inst in link_insts:
-            link_doc = link_reader.get_link_doc(link_inst)
-            if not link_doc:
+        for pair in selected_pairs:
+            link_inst = pair.get('link_instance')
+            link_doc = pair.get('link_doc')
+            levels = list(pair.get('levels') or [])
+            if not link_inst or not link_doc or not levels:
                 continue
                 
             output.print_md("\n**Processing Link:** " + link_inst.Name)
-            transform = link_inst.GetTotalTransform()
+            transform = pair.get('transform') or link_inst.GetTotalTransform()
+
+            selected_level_ids = set()
+            for lvl in levels:
+                try:
+                    selected_level_ids.add(int(lvl.Id.IntegerValue))
+                except Exception:
+                    continue
+            if not selected_level_ids:
+                continue
             
             # Find Baskets
             baskets = find_baskets_in_link(link_doc)
@@ -308,10 +323,23 @@ def main():
             
             # Find Rooms in Link (on levels with baskets)
             # Optimization: Get all rooms once
-            all_rooms = list(link_reader.iter_rooms(link_doc))
+            all_rooms = []
+            for room in link_reader.iter_rooms(link_doc):
+                try:
+                    if int(room.LevelId.IntegerValue) in selected_level_ids:
+                        all_rooms.append(room)
+                except Exception:
+                    continue
             
             for basket in baskets:
                 try:
+                    try:
+                        basket_level = int(basket.LevelId.IntegerValue)
+                        if basket_level not in selected_level_ids:
+                            continue
+                    except Exception:
+                        pass
+
                     basket_pt = basket.Location.Point
                     
                     # Find Room
@@ -485,7 +513,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
 
 

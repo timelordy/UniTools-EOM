@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-from pyrevit import forms
+from pyrevit import DB, forms
 
 import config_loader
 import link_reader
+import magic_context
 import placement_engine
 
 from utils_revit import alert, trace, tx
@@ -49,11 +50,14 @@ def run_placement(doc, output, script_module):
     output.print_md('Host (EOM) document: `{0}`'.format(doc.Title))
 
     trace('Select link UI')
-    link_inst = link_reader.select_link_instance_auto(doc)
+    force_selection = bool(getattr(magic_context, 'FORCE_SELECTION', False))
+    link_inst = getattr(magic_context, 'SELECTED_LINK', None) if force_selection else None
+    if link_inst is None:
+        link_inst = link_reader.select_link_instance_auto(doc)
     if link_inst is None:
         trace('No link found')
         output.print_md('**No link found.**')
-        return
+        return 0
 
     trace('Selected link: {0}'.format(getattr(link_inst, 'Name', '<no name>')))
     if not link_reader.is_link_loaded(link_inst):
@@ -64,9 +68,30 @@ def run_placement(doc, output, script_module):
     link_doc = link_reader.get_link_doc(link_inst)
     if link_doc is None:
         alert('Could not access link document. Is the link loaded?')
-        return
+        return 0
 
     output.print_md('Selected link: `{0}`'.format(link_inst.Name))
+
+    selected_levels = list(getattr(magic_context, 'SELECTED_LEVELS', []) or []) if force_selection else []
+    if not selected_levels:
+        selected_levels = link_reader.select_levels_multi(
+            link_doc,
+            title=u'Выберите уровни для обработки',
+            default_all=False
+        )
+    if not selected_levels:
+        output.print_md('**Отменено (уровни не выбраны).**')
+        return 0
+
+    selected_level_ids = set()
+    for lvl in selected_levels:
+        try:
+            selected_level_ids.add(int(lvl.Id.IntegerValue))
+        except Exception:
+            continue
+    if not selected_level_ids:
+        output.print_md('**Отменено (уровни не выбраны).**')
+        return 0
 
     trace('Load rules')
     rules = config_loader.load_rules()
@@ -122,9 +147,7 @@ def run_placement(doc, output, script_module):
     _report_symbol_geometry(symbol, output)
 
     trace('Collect rooms')
-    # Auto-select all levels
     lvl = None
-    level_id = None
 
     # Pick / infer host level to avoid placing on the wrong story (common cause of "nothing appears")
     host_level = None
@@ -176,12 +199,18 @@ def run_placement(doc, output, script_module):
 
     with forms.ProgressBar(title='EOM: Reading room centers', cancellable=True, step=1) as pb:
         pb.max_value = pb_max
-        for r in link_reader.iter_rooms(link_doc, limit=scan_limit_rooms, level_id=level_id):
+        for r in link_reader.iter_rooms(link_doc, limit=scan_limit_rooms, level_id=None):
             processed += 1
             pb.update_progress(min(processed, pb_max), pb_max)
             if pb.cancelled:
                 trace('Cancelled while computing room points')
-                return
+                return 0
+
+            try:
+                if int(r.LevelId.IntegerValue) not in selected_level_ids:
+                    continue
+            except Exception:
+                continue
 
             # Skip unplaced / not-enclosed rooms
             try:
@@ -367,6 +396,7 @@ def run_placement(doc, output, script_module):
 
     output.print_md('---')
     output.print_md('Placed **{0}** light(s).'.format(created_count))
+    return created_count
 
 
 def _report_symbol_geometry(symbol, output):

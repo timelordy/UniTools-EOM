@@ -102,7 +102,7 @@ def main():
             link_title=u'Выберите связь(и) АР',
             level_title=u'Выберите этажи',
             default_all_links=True,
-            default_all_levels=True,
+            default_all_levels=False,
             loaded_only=True
         )
         if not pairs:

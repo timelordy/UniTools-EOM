@@ -107,7 +107,7 @@ def prepare_context():
         forms.alert(u'В AR-связи не найдены помещения.', exitscript=True)
         return None
 
-    levels = link_reader.select_levels_multi(link_doc, title=u'Выберите уровни для ЩЭ в нишах', default_all=True)
+    levels = link_reader.select_levels_multi(link_doc, title=u'Выберите уровни для ЩЭ в нишах', default_all=False)
     if not levels:
         return None
 

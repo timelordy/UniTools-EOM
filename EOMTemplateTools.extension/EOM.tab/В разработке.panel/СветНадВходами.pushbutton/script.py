@@ -429,22 +429,18 @@ def collect_existing_points(host_doc, comment_tag):
 
 def main():
     output.print_md('# Свет над входами (DEBUG)')
-    
-    # 1. Select Link
-    link_inst = link_reader.select_link_instance_auto(doc)
-    if not link_inst:
-        alert('Связь АР не найдена или не выбрана.')
-        return
-    link_doc = link_reader.get_link_doc(link_inst)
-    if not link_doc:
-        alert('Не удалось получить документ связи.')
-        return
 
-    # 2. Select Levels
-    selected_levels = link_reader.select_levels_multi(link_doc, title='Выберите уровни')
-    if not selected_levels:
+    pairs = link_reader.select_link_level_pairs(
+        doc,
+        link_title=u'Выберите связь(и) АР',
+        level_title=u'Выберите уровни для обработки',
+        default_all_links=True,
+        default_all_levels=False,
+        loaded_only=True
+    )
+    if not pairs:
+        output.print_md('**Отменено (связи/уровни не выбраны).**')
         return
-    level_ids = [l.Id.IntegerValue for l in selected_levels if hasattr(l, 'Id')]
 
     # 3. Select Family
     symbol = placement_engine.select_family_symbol(
@@ -469,69 +465,102 @@ def main():
     existing_pts = collect_existing_points(doc, comment_tag)
     grid = PointGridIndex(dedupe_ft)
     grid.add_many(existing_pts)
-
-    xf = link_inst.GetTotalTransform()
     
     count_placed = 0
     
     with tx('ЭОМ: Светильники над входами', doc=doc):
-        # Gather doors
-        doors = []
-        for lid in level_ids:
-            try:
-                ds = link_reader.iter_elements_by_category(link_doc, DB.BuiltInCategory.OST_Doors, level_id=lid)
-                doors.extend(list(ds))
-            except Exception:
-                pass
-        
-        for door in doors:
-            # Check criteria
-            is_roof = is_roof_exit_door(door, link_doc)
-            is_ent = is_entrance_door(door, link_doc)
-            
-            if (not is_roof) and (not is_ent):
+        for pair in pairs:
+            link_inst = pair.get('link_instance')
+            link_doc = pair.get('link_doc')
+            levels = list(pair.get('levels') or [])
+            if link_inst is None or link_doc is None or not levels:
                 continue
-                
-            # DEBUG: Print candidate details
-            fr_dbg, tr_dbg = get_from_to_rooms(door, link_doc)
-            rn_fr = room_name(fr_dbg)
-            rn_tr = room_name(tr_dbg)
-            dt_dbg = door_text(door)
-            output.print_md(u'- ID: `{}` | Type: `{}` | Rooms: `{}` <-> `{}`'.format(door.Id, dt_dbg, rn_fr, rn_tr))
 
-            # Calc position
-            c = door_center_point_link(door)
-            if not c: continue
-            
-            z_head = door_head_z_link(door) or c.Z
-            
-            # Base point above head
-            p_link = DB.XYZ(c.X, c.Y, z_head + above_offset_ft)
-            
-            # Determine outside direction
-            normal = try_get_door_facing_xy(door)
-            outside_dir = None
-            if normal:
-                outside_dir = choose_outside_dir_by_probe(door, link_doc, c, normal)
-                if not outside_dir:
-                    outside_dir = normal
-            
-            if outside_dir:
-                th = try_get_wall_thickness_ft(door) or 0.0
-                wall_off = th * 0.5
-                p_link = p_link + (outside_dir * (wall_off + outside_offset_ft))
-            
-            # Transform to host
-            p_host = xf.OfPoint(p_link)
-            
-            if grid.is_near(p_host):
+            try:
+                link_name = link_inst.Name
+            except Exception:
+                link_name = u'<Связь>'
+            output.print_md(u'## Обработка связи: `{0}`'.format(link_name))
+
+            level_ids = []
+            for lvl in levels:
+                try:
+                    level_ids.append(int(lvl.Id.IntegerValue))
+                except Exception:
+                    continue
+            if not level_ids:
                 continue
-                
-            inst = placement_engine.place_point_family_instance(doc, symbol, p_host)
-            if inst:
-                set_comments(inst, comment_tag)
-                grid.add(p_host)
-                count_placed += 1
+
+            xf = pair.get('transform')
+            if xf is None:
+                try:
+                    xf = link_inst.GetTotalTransform()
+                except Exception:
+                    xf = None
+            if xf is None:
+                continue
+
+            doors = []
+            for lid in level_ids:
+                try:
+                    ds = link_reader.iter_elements_by_category(
+                        link_doc,
+                        DB.BuiltInCategory.OST_Doors,
+                        level_id=DB.ElementId(lid)
+                    )
+                    doors.extend(list(ds))
+                except Exception:
+                    pass
+
+            for door in doors:
+                # Check criteria
+                is_roof = is_roof_exit_door(door, link_doc)
+                is_ent = is_entrance_door(door, link_doc)
+
+                if (not is_roof) and (not is_ent):
+                    continue
+
+                # DEBUG: Print candidate details
+                fr_dbg, tr_dbg = get_from_to_rooms(door, link_doc)
+                rn_fr = room_name(fr_dbg)
+                rn_tr = room_name(tr_dbg)
+                dt_dbg = door_text(door)
+                output.print_md(u'- ID: `{}` | Type: `{}` | Rooms: `{}` <-> `{}`'.format(door.Id, dt_dbg, rn_fr, rn_tr))
+
+                # Calc position
+                c = door_center_point_link(door)
+                if not c:
+                    continue
+
+                z_head = door_head_z_link(door) or c.Z
+
+                # Base point above head
+                p_link = DB.XYZ(c.X, c.Y, z_head + above_offset_ft)
+
+                # Determine outside direction
+                normal = try_get_door_facing_xy(door)
+                outside_dir = None
+                if normal:
+                    outside_dir = choose_outside_dir_by_probe(door, link_doc, c, normal)
+                    if not outside_dir:
+                        outside_dir = normal
+
+                if outside_dir:
+                    th = try_get_wall_thickness_ft(door) or 0.0
+                    wall_off = th * 0.5
+                    p_link = p_link + (outside_dir * (wall_off + outside_offset_ft))
+
+                # Transform to host
+                p_host = xf.OfPoint(p_link)
+
+                if grid.is_near(p_host):
+                    continue
+
+                inst = placement_engine.place_point_family_instance(doc, symbol, p_host)
+                if inst:
+                    set_comments(inst, comment_tag)
+                    grid.add(p_host)
+                    count_placed += 1
 
     output.print_md('Размещено светильников: **{}**'.format(count_placed))
 

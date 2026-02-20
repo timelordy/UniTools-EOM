@@ -315,7 +315,7 @@ def select_level(doc, title='Select Level', allow_none=True):
     return None
 
 
-def select_levels_multi(doc, title='Select Levels (Multi)', default_all=True):
+def select_levels_multi(doc, title='Select Levels (Multi)', default_all=False):
     """Select multiple levels from doc using SelectFromList."""
     # Проверка Magic Button
     if _magic_active() and magic_context.SELECTED_LEVELS:
@@ -457,7 +457,7 @@ def select_link_level_pairs(host_doc,
                             link_title=u'Выберите связь(и) АР',
                             level_title=u'Выберите уровни',
                             default_all_links=True,
-                            default_all_levels=True,
+                            default_all_levels=False,
                             loaded_only=True):
     """Выбирает несколько связей и уровни для каждой связи.
 

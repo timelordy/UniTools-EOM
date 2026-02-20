@@ -270,22 +270,26 @@ def main():
         forms.alert(u'Это семейство. В семействах уровни не создаются.', exitscript=True)
         return
 
-    link_inst = link_reader.select_link_instance(doc, title=u'Выберите AR-связь')
-    if not link_inst:
-        return
-
-    link_doc = link_reader.get_link_doc(link_inst)
-    if not link_doc:
-        forms.alert(u'Связь не загружена.', exitscript=True)
-        return
-
-    link_levels = link_reader.select_levels_multi(
-        link_doc,
-        title=u'Выберите уровни из AR (будут созданы в текущем файле)',
-        default_all=True
+    selected_pairs = link_reader.select_link_level_pairs(
+        doc,
+        link_title=u'Выберите AR-связь(и)',
+        level_title=u'Выберите уровни из AR (будут созданы в текущем файле)',
+        default_all_links=True,
+        default_all_levels=False,
+        loaded_only=True
     )
+    if not selected_pairs:
+        return
 
-    if not link_levels:
+    link_batches = []
+    for pair in selected_pairs:
+        link_inst = pair.get('link_instance')
+        link_levels = list(pair.get('levels') or [])
+        if link_inst is None or not link_levels:
+            continue
+        link_batches.append((link_inst, link_levels))
+
+    if not link_batches:
         return
 
     host_levels = link_reader.list_levels(doc)
@@ -311,68 +315,74 @@ def main():
     debug_lines = []
 
     with tx(u'ЭОМ: Копировать уровни из AR', doc=doc, swallow_warnings=True):
-        for src in link_levels:
-            src_name = _level_name(src)
-            src_elev = _elev_ft(src)
-
-            if _find_level_by_name(host_levels, src_name) is not None:
-                skipped_name += 1
-                continue
-
-            if _find_level_by_elevation(host_levels, src_elev, tol_ft) is not None:
-                skipped_elev += 1
-                continue
-
-            new_level = DB.Level.Create(doc, float(src_elev))
-            if new_level is None:
-                continue
-
+        for link_inst, link_levels in link_batches:
             try:
-                new_level.Name = src_name
+                link_name = link_inst.Name
             except Exception:
+                link_name = u'<Связь>'
+            output.print_md(u'## Обработка связи: `{}`'.format(link_name))
+            for src in link_levels:
+                src_name = _level_name(src)
+                src_elev = _elev_ft(src)
+
+                if _find_level_by_name(host_levels, src_name) is not None:
+                    skipped_name += 1
+                    continue
+
+                if _find_level_by_elevation(host_levels, src_elev, tol_ft) is not None:
+                    skipped_elev += 1
+                    continue
+
+                new_level = DB.Level.Create(doc, float(src_elev))
+                if new_level is None:
+                    continue
+
                 try:
-                    new_level.Name = src_name + u'_AR'
-                    renamed += 1
+                    new_level.Name = src_name
                 except Exception:
-                    pass
+                    try:
+                        new_level.Name = src_name + u'_AR'
+                        renamed += 1
+                    except Exception:
+                        pass
 
-            _try_copy_building_story(src, new_level)
+                _try_copy_building_story(src, new_level)
 
-            host_levels.append(new_level)
-            created += 1
+                host_levels.append(new_level)
+                created += 1
 
-            _, floor_status = _create_plan_for_level(
-                doc,
-                new_level,
-                source_floor_plan,
-                DB.ViewType.FloorPlan,
-                DB.ViewFamily.FloorPlan,
-                view_names,
-                debug_lines
-            )
-            if floor_status == u'created':
-                created_floor += 1
-            elif floor_status == u'exists':
-                skipped_floor_exists += 1
-            else:
-                failed_floor += 1
-
-            if source_ceiling_plan is not None:
-                _, ceil_status = _create_plan_for_level(
+                _, floor_status = _create_plan_for_level(
                     doc,
                     new_level,
-                    source_ceiling_plan,
-                    DB.ViewType.CeilingPlan,
-                    DB.ViewFamily.CeilingPlan,
+                    source_floor_plan,
+                    DB.ViewType.FloorPlan,
+                    DB.ViewFamily.FloorPlan,
                     view_names,
                     debug_lines
                 )
-                if ceil_status == u'created':
-                    created_ceiling += 1
-                elif ceil_status == u'exists':
-                    skipped_ceiling_exists += 1
+                if floor_status == u'created':
+                    created_floor += 1
+                elif floor_status == u'exists':
+                    skipped_floor_exists += 1
                 else:
-                    failed_ceiling += 1
+                    failed_floor += 1
+
+                if source_ceiling_plan is not None:
+                    _, ceil_status = _create_plan_for_level(
+                        doc,
+                        new_level,
+                        source_ceiling_plan,
+                        DB.ViewType.CeilingPlan,
+                        DB.ViewFamily.CeilingPlan,
+                        view_names,
+                        debug_lines
+                    )
+                    if ceil_status == u'created':
+                        created_ceiling += 1
+                    elif ceil_status == u'exists':
+                        skipped_ceiling_exists += 1
+                    else:
+                        failed_ceiling += 1
 
     output.print_md(u'---')
     output.print_md(u'Создано уровней: **{}**'.format(created))
@@ -408,4 +418,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

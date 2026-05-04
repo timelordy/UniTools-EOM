@@ -3,14 +3,20 @@
 import math
 from utils_units import mm_to_ft, ft_to_mm
 import constants
-try:
-    import socket_utils as su
-except ImportError:
-    import sys, os
-    lib_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'lib')
-    if lib_path not in sys.path:
-        sys.path.append(lib_path)
-    import socket_utils as su
+from domain_port import DEFAULT_SOCKET_DOMAIN_PORT
+
+# Injectable port used by domain logic (keeps infra dependency behind a small contract).
+su = DEFAULT_SOCKET_DOMAIN_PORT
+
+
+def set_domain_port(port):
+    """Override current domain port (useful for tests)."""
+    global su
+    su = port or DEFAULT_SOCKET_DOMAIN_PORT
+
+
+def get_domain_port():
+    return su
 
 def _as_bool(value, default=False):
     if value is None:
@@ -118,10 +124,10 @@ def new_general_breakdown():
 
 
 def compile_patterns(patterns):
-    return su._compile_patterns(patterns)
+    return su.compile_patterns(patterns)
 
 def match_any(regex_list, text):
-    return su._match_any(regex_list, text)
+    return su.match_any(regex_list, text)
 
 def is_hallway(text, patterns_rx):
     return match_any(patterns_rx, text)
@@ -137,14 +143,14 @@ def is_sliding_door_text(text, patterns_rx):
 def filter_rooms(raw_rooms, rules, apt_rx, public_rx, wet_rx, kitchen_rx, exclude_rx=None):
     filtered = []
     for r in raw_rooms:
-        txt = su._room_text(r)
+        txt = su.room_text(r)
         if public_rx and match_any(public_rx, txt):
             continue
         if apt_rx and (not match_any(apt_rx, txt)):
             continue
         if match_any(wet_rx, txt):
             continue
-        if su._room_is_wc(r, rules):
+        if su.room_is_wc(r, rules):
             continue
         if match_any(kitchen_rx, txt):
             continue
@@ -164,7 +170,7 @@ def calculate_allowed_path(
     wall_filter=None,
     breakdown=None,
 ):
-    segs = su._get_room_outer_boundary_segments(room, boundary_opts)
+    segs = su.get_room_outer_boundary_segments(room, boundary_opts)
     if not segs:
         return [], 0.0
     if wall_filter is None:
@@ -181,7 +187,7 @@ def calculate_allowed_path(
         wall = link_doc.GetElement(seg.ElementId)
         if not wall:
             continue
-        if not su._is_wall_element(wall):
+        if not su.is_wall_element(wall):
             continue
         try:
             if breakdown is not None:
@@ -191,10 +197,10 @@ def calculate_allowed_path(
         is_outer_boundary = False
         try:
             if wall_filter.get('exterior_by_geom', True):
-                is_outer_boundary = bool(su._is_room_outer_boundary_segment(link_doc, room, c))
+                is_outer_boundary = bool(su.is_room_outer_boundary_segment(link_doc, room, c))
         except Exception:
             is_outer_boundary = False
-        if su._is_curtain_wall(wall):
+        if su.is_curtain_wall(wall):
             try:
                 if breakdown is not None:
                     key = 'minus_exterior_ft' if is_outer_boundary else 'minus_kzh_ft'
@@ -203,7 +209,7 @@ def calculate_allowed_path(
                 pass
             continue
         try:
-            if wall_filter.get('skip_facade') and su._is_facade_wall(
+            if wall_filter.get('skip_facade') and su.is_facade_wall(
                 wall,
                 patterns_rx=wall_filter.get('facade_rx') or wall_filter.get('exterior_rx'),
             ):
@@ -216,7 +222,7 @@ def calculate_allowed_path(
         except Exception:
             pass
         try:
-            if wall_filter.get('skip_structural') and su._is_structural_wall(wall):
+            if wall_filter.get('skip_structural') and su.is_structural_wall(wall):
                 try:
                     if breakdown is not None:
                         breakdown['minus_kzh_ft'] = float(breakdown.get('minus_kzh_ft', 0.0) or 0.0) + float(seg_len or 0.0)
@@ -226,7 +232,7 @@ def calculate_allowed_path(
         except Exception:
             pass
         try:
-            if wall_filter.get('skip_monolith') and su._is_monolith_wall(wall, patterns_rx=wall_filter.get('monolith_rx')):
+            if wall_filter.get('skip_monolith') and su.is_monolith_wall(wall, patterns_rx=wall_filter.get('monolith_rx')):
                 try:
                     if breakdown is not None:
                         breakdown['minus_kzh_ft'] = float(breakdown.get('minus_kzh_ft', 0.0) or 0.0) + float(seg_len or 0.0)
@@ -235,7 +241,7 @@ def calculate_allowed_path(
                 continue
         except Exception:
             pass
-        ops = su._get_wall_openings_cached(link_doc, wall, openings_cache)
+        ops = su.get_wall_openings_cached(link_doc, wall, openings_cache)
         exterior_filtered = bool(is_outer_boundary)
         try:
             if exterior_filtered and wall_filter.get('exterior_requires_openings', False):
@@ -272,7 +278,7 @@ def calculate_allowed_path(
             corner_offset = 0.0
         for pt, w in ops.get('doors', []):
             half = (float(w) * 0.5) if w else 1.5
-            d0 = su._project_dist_on_curve_xy_ft(c, seg_len, pt, tol_ft=2.0)
+            d0 = su.project_dist_on_curve_xy_ft(c, seg_len, pt, tol_ft=2.0)
             if d0 is not None:
                 a = d0 - half - avoid_door_ft
                 b = d0 + half + avoid_door_ft
@@ -280,7 +286,7 @@ def calculate_allowed_path(
                 blocked_openings.append((a, b))
         for pt, w in ops.get('windows', []):
             half = (float(w) * 0.5) if w else 2.0
-            d0 = su._project_dist_on_curve_xy_ft(c, seg_len, pt, tol_ft=2.0)
+            d0 = su.project_dist_on_curve_xy_ft(c, seg_len, pt, tol_ft=2.0)
             if d0 is not None:
                 a = d0 - half - window_offset
                 b = d0 + half + window_offset
@@ -288,7 +294,7 @@ def calculate_allowed_path(
                 blocked_openings.append((a, b))
         try:
             if breakdown is not None:
-                merged_openings = su._merge_intervals(blocked_openings, 0.0, seg_len)
+                merged_openings = su.merge_intervals(blocked_openings, 0.0, seg_len)
                 minus_ops = 0.0
                 for aa, bb in merged_openings:
                     minus_ops += (bb - aa)
@@ -298,8 +304,8 @@ def calculate_allowed_path(
         if corner_offset > 1e-6:
             blocked.append((0.0, corner_offset))
             blocked.append((seg_len - corner_offset, seg_len))
-        merged = su._merge_intervals(blocked, 0.0, seg_len)
-        allowed = su._invert_intervals(merged, 0.0, seg_len)
+        merged = su.merge_intervals(blocked, 0.0, seg_len)
+        allowed = su.invert_intervals(merged, 0.0, seg_len)
         for a, b in allowed:
             if (b - a) > 1e-6:
                 allowed_path.append((wall, c, seg_len, a, b))
@@ -331,7 +337,7 @@ def generate_candidates_hallway(allowed_path, room_area_sqm):
         max_d = -1.0
         for i1 in range(len(fine_candidates)):
             for i2 in range(i1 + 1, len(fine_candidates)):
-                d = su._dist_xy(fine_candidates[i1][1], fine_candidates[i2][1])
+                d = su.dist_xy(fine_candidates[i1][1], fine_candidates[i2][1])
                 if d > max_d:
                     max_d = d
                     best_pair = (fine_candidates[i1][:3], fine_candidates[i2][:3])
@@ -373,7 +379,7 @@ def is_point_near_sliding_doors(pt, doors, extra_ft=0.0):
             half = float(half_w or 0.0)
         except Exception:
             half = 0.0
-        if su._dist_xy(pt, dpt) <= (half + extra):
+        if su.dist_xy(pt, dpt) <= (half + extra):
             return True
     return False
 

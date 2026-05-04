@@ -4,13 +4,12 @@
 Dispatches execution to specific placement logic based on tool ID.
 """
 import os
-import sys
 import traceback
 import io
 import time
 from pyrevit import script, revit, DB
 from config_loader import load_rules
-from placement_engine import get_or_load_family_symbol, place_point_family_instance
+from placement_engine import place_point_family_instance
 
 # DEBUG LOGGING setup
 DEBUG_LOG_FILE = os.path.join(os.environ.get("TEMP"), "eom_orchestrator.log")
@@ -163,25 +162,58 @@ def run_lights_center(doc, uidoc, output, rules):
 
     return {'placed': placed, 'skipped': skipped}
 
+
+TOOL_HANDLERS = {}
+
+
+def register_tool_handler(tool_id, handler):
+    """Register a tool handler function by tool_id."""
+    if not tool_id or not callable(handler):
+        return
+    TOOL_HANDLERS[str(tool_id)] = handler
+
+
+def _infer_tool_id_from_script(script_obj):
+    """Best-effort tool id inference from script bundle path."""
+    if not script_obj:
+        return None
+    try:
+        path = script_obj.get_bundle_files()[0]
+        log_debug("Script path: " + str(path))
+        tool_hints = (
+            ('СветПоЦентру', 'lights_center'),
+            ('СветВЛифтах', 'lights_elevator'),
+        )
+        for marker, inferred_tool_id in tool_hints:
+            if marker in path:
+                return inferred_tool_id
+    except Exception as e:
+        log_debug("Error inferring tool id: " + str(e))
+    return None
+
+
+def _resolve_tool_id(script_obj):
+    tool_id = os.environ.get('EOM_HUB_TOOL_ID')
+    log_debug("Tool ID from env: " + str(tool_id))
+    if tool_id:
+        return tool_id
+    return _infer_tool_id_from_script(script_obj)
+
+
+def _run_tool_handler(tool_id, doc, uidoc, output, rules):
+    handler = TOOL_HANDLERS.get(tool_id)
+    if handler is None:
+        return None
+    return handler(doc, uidoc, output, rules)
+
+
+register_tool_handler('lights_center', run_lights_center)
+
 def run_placement(doc, uidoc, output, script_obj):
     """Main entry point called by scripts."""
     log_debug("run_placement called")
     try:
-        # Determine tool ID
-        tool_id = os.environ.get('EOM_HUB_TOOL_ID')
-        log_debug("Tool ID from env: " + str(tool_id))
-        
-        # Fallback: infer from script path
-        if not tool_id and script_obj:
-            try:
-                path = script_obj.get_bundle_files()[0]
-                log_debug("Script path: " + str(path))
-                if 'СветПоЦентру' in path:
-                    tool_id = 'lights_center'
-                elif 'СветВЛифтах' in path:
-                    tool_id = 'lights_elevator'
-            except Exception as e:
-                log_debug("Error inferring tool id: " + str(e))
+        tool_id = _resolve_tool_id(script_obj)
 
         if output:
             output.print_md("Запуск инструмента: **{}**".format(tool_id or 'Unknown'))
@@ -192,9 +224,10 @@ def run_placement(doc, uidoc, output, script_obj):
         except Exception as e:
             log_debug("Error loading rules: " + str(e))
             rules = {}
-        
-        if tool_id == 'lights_center':
-            return run_lights_center(doc, uidoc, output, rules)
+
+        result = _run_tool_handler(tool_id, doc, uidoc, output, rules)
+        if result is not None:
+            return result
         
         msg = "Инструмент '{}' пока не реализован в Orchestrator".format(tool_id)
         log_debug(msg)

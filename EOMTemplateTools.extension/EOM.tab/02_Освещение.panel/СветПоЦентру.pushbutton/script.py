@@ -1,10 +1,50 @@
 ﻿# -*- coding: utf-8 -*-
 
+import imp
+import os
+import sys
 from pyrevit import revit, script
 from time_savings import report_time_saved, set_element_count, calculate_time_saved, calculate_time_saved_range
 import link_reader
 import magic_context
-import orchestrator
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ORCHESTRATOR_PATH = os.path.join(_SCRIPT_DIR, 'orchestrator.py')
+_SCRIPT_DIR_NORM = os.path.normcase(os.path.abspath(_SCRIPT_DIR))
+
+
+def _is_module_from_current_tool(mod):
+    try:
+        mod_file = getattr(mod, '__file__', None)
+        if not mod_file:
+            return False
+        mod_dir = os.path.normcase(os.path.abspath(os.path.dirname(mod_file)))
+        return mod_dir == _SCRIPT_DIR_NORM
+    except Exception:
+        return False
+
+
+def _purge_foreign_module(name):
+    mod = sys.modules.get(name)
+    if mod is None:
+        return
+    if _is_module_from_current_tool(mod):
+        return
+    try:
+        del sys.modules[name]
+    except Exception:
+        pass
+
+
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
+# Avoid cross-tool module cache collisions in pyRevit/IronPython:
+# many pushbuttons reuse the same top-level module names.
+for _module_name in ('constants', 'domain', 'adapters', 'orchestrator'):
+    _purge_foreign_module(_module_name)
+
+orchestrator = imp.load_source('eom_lights_center_orchestrator', _ORCHESTRATOR_PATH)
 
 def main():
     doc = revit.doc

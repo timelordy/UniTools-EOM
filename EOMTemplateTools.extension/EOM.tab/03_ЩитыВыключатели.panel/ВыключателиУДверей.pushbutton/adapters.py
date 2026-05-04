@@ -18,6 +18,7 @@ from adapters_geometry import (
 from adapters_doors import get_door_info, is_entrance_door
 from adapters_switches import (
     calc_switch_position,
+    calc_switch_position_with_debug,
     calc_switch_position_from_separation_line,
     get_closest_level,
     place_switch,
@@ -29,6 +30,7 @@ from adapters_outlets import calc_outlet_position, get_outlet_symbol, place_outl
 __all__ = [
     "calc_outlet_position",
     "calc_switch_position",
+    "calc_switch_position_with_debug",
     "calc_switch_position_from_separation_line",
     "find_adjacent_wall",
     "find_wall_near_point",

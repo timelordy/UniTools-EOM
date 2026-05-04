@@ -1,0 +1,246 @@
+{
+    "coverage":  {
+                     "reportPaths":  [
+                                         "coverage/lcov.info",
+                                         "coverage/coverage-final.json",
+                                         "coverage/coverage.xml"
+                                     ],
+                     "minimum":  43.5,
+                     "changedLinesMinimum":  90,
+                     "excludePaths":  [
+                                          "^tests/",
+                                          "^coverage/"
+                                      ],
+                     "commands":  "npm run coverage",
+                     "summaryPath":  "coverage/coverage-summary.json",
+                     "enabled":  false
+                 },
+    "complexity":  {
+                       "maxBranchNodes":  10,
+                       "maxFileLines":  500,
+                       "maxPublicExports":  10,
+                       "maxMemberAccessDepth":  3,
+                       "maxParameters":  5,
+                       "maxNestingDepth":  4,
+                       "maxFunctionLines":  40,
+                       "maxInterfaceMembers":  10,
+                       "allowMagicNumbers":  [
+                                                 0,
+                                                 1,
+                                                 -1
+                                             ],
+                       "maxConstructorDependencies":  5,
+                       "maxClassMethods":  10
+                   },
+    "ruleRegistry":  {
+                         "rules":  {
+                                       "quality-verdict":  {
+                                                               "defaultPosture":  "blocking",
+                                                               "roi":  "high",
+                                                               "class":  "proof_integrity",
+                                                               "owner":  "guardrails-platform",
+                                                               "capability":  "post-change-only",
+                                                               "familyId":  "quality/completion-proof",
+                                                               "status":  "strict"
+                                                           },
+                                       "configuration-surface":  {
+                                                                     "defaultPosture":  "conditional",
+                                                                     "roi":  "medium",
+                                                                     "class":  "architecture_policy_governance",
+                                                                     "owner":  "guardrails-platform",
+                                                                     "capability":  "pre-change-capable",
+                                                                     "familyId":  "semantic-diff/config-surface",
+                                                                     "status":  "active"
+                                                                 },
+                                       "verification":  {
+                                                            "defaultPosture":  "blocking",
+                                                            "roi":  "high",
+                                                            "class":  "proof_integrity",
+                                                            "owner":  "guardrails-platform",
+                                                            "capability":  "post-change-only",
+                                                            "familyId":  "quality/verification-chain",
+                                                            "status":  "strict"
+                                                        }
+                                   },
+                         "categories":  {
+                                            "policy":  {
+                                                           "defaultPosture":  "blocking",
+                                                           "roi":  "high",
+                                                           "class":  "architecture_policy_governance",
+                                                           "owner":  "guardrails-platform",
+                                                           "capability":  "pre-change-capable",
+                                                           "status":  "strict"
+                                                       },
+                                            "ast-dip":  {
+                                                            "defaultPosture":  "blocking",
+                                                            "roi":  "high",
+                                                            "class":  "hard_safety",
+                                                            "owner":  "guardrails-architecture",
+                                                            "capability":  "pre-change-capable",
+                                                            "status":  "active"
+                                                        },
+                                            "quality-report":  {
+                                                                   "defaultPosture":  "advisory",
+                                                                   "roi":  "medium",
+                                                                   "class":  "review_hygiene_guidance",
+                                                                   "owner":  "guardrails-platform",
+                                                                   "capability":  "post-change-only",
+                                                                   "status":  "active"
+                                                               }
+                                        }
+                     },
+    "architectureRules":  {
+                              "label":  "domain must not import ui files anywhere in repo",
+                              "scope":  "repo",
+                              "forbiddenTargets":  "^src/ui/",
+                              "forbiddenImports":  [
+                                                       "^@/ui/",
+                                                       "^\\.\\./ui/"
+                                                   ],
+                              "source":  "^src/domain/"
+                          },
+    "severity":  {
+                     "qualityBudget":  {
+                                           "exceededMode":  "block",
+                                           "warningMode":  "replan-required"
+                                       },
+                     "blockingThreshold":  "major",
+                     "rules":  [
+                                   {
+                                       "categoryPattern":  "^(policy|tests|coverage|coverage-changed-lines|dependency-rule|architecture-rule|layer-rule|human-interrupt|ast-helper|ast-parse|ast-dip)$",
+                                       "severity":  "blocker"
+                                   },
+                                   {
+                                       "categoryPattern":  "^(duplication|ast-complexity|ast-cohesion|ast-law-of-demeter|ast-explicitness|ast-inheritance|ast-srp|ast-isp)$",
+                                       "severity":  "major"
+                                   },
+                                   {
+                                       "categoryPattern":  "^contract-diff$",
+                                       "severity":  "blocker"
+                                   }
+                               ]
+                 },
+    "contractRules":  {
+                          "label":  "api and config contracts require structured diff review",
+                          "checklist":  [
+                                            "verify that removed keys are intentional and documented",
+                                            "verify that generated clients, validators, and docs are updated together"
+                                        ],
+                          "formats":  "json",
+                          "reason":  "API and configuration contracts need explicit review when keys disappear or types change",
+                          "source":  "(^|/)(openapi|schema|config).+\\.json$"
+                      },
+    "tests":  {
+                  "commands":  [
+                                   "python -m pytest"
+                               ],
+                  "required":  true,
+                  "timeoutSec":  600
+              },
+    "duplication":  {
+                        "minLines":  6
+                    },
+    "interruptRules":  {
+                           "label":  "core guardrail files require human review",
+                           "checklist":  "verify that the change cannot silently disable blocking behavior",
+                           "reason":  "these files can weaken the guardrail pipeline if changed carelessly",
+                           "source":  "^hooks/"
+                       },
+    "layerRules":  [
+                       {
+                           "label":  "ui layer must stay inside explicit boundaries",
+                           "source":  "^src/ui/",
+                           "allowedTargets":  [
+                                                  "^src/ui/",
+                                                  "^src/shared/"
+                                              ]
+                       },
+                       {
+                           "label":  "ui files must not embed SQL statements",
+                           "forbiddenTextPatterns":  "(?is)\\b(?:SELECT\\s+.+?\\s+FROM|INSERT\\s+INTO|UPDATE\\s+.+?\\s+SET|DELETE\\s+FROM)\\b",
+                           "source":  "^src/ui/"
+                       }
+                   ],
+    "dependencyRules":  {
+                            "label":  "domain must not depend on ui",
+                            "source":  "^src/domain/",
+                            "forbiddenImports":  [
+                                                     "^@/ui/",
+                                                     "^\\.\\./ui/"
+                                                 ]
+                        },
+    "reporting":  {
+                      "sessionReviewAdvisory":  {
+                                                    "richness":  "rich"
+                                                },
+                      "calibrationOperatorSnapshot":  {
+                                                          "richness":  "rich"
+                                                      },
+                      "artifactGeneration":  {
+                                                 "nonCoreReportsMode":  "full",
+                                                 "calibrationArtifactsMode":  "full"
+                                             }
+                  },
+    "execution":  {
+                      "mode":  "standard"
+                  },
+    "analyzers":  {
+                      "commands":  null
+                  },
+    "waivers":  {
+                    "requiredFields":  [
+                                           "owner",
+                                           "reason",
+                                           "expires_on"
+                                       ],
+                    "maxDurationDays":  14
+                },
+    "risk":  {
+                 "escalation":  {
+                                    "nonCoreArtifactPathPatterns":  "^hooks/scripts/(?:gate-metrics-report|pipeline-health|calibration-operator-snapshot|operator-dashboard)\\.ps1$",
+                                    "highRiskRoi":  "high",
+                                    "highRiskRuleStatuses":  "strict",
+                                    "controlPlanePathPatterns":  [
+                                                                     "^hooks/",
+                                                                     "^repo-policy\\.json$",
+                                                                     "^repo-policy\\.authoring\\.json$",
+                                                                     "^\\.codex/repo-policy\\.json$"
+                                                                 ]
+                                },
+                 "tiers":  {
+                               "low":  {
+                                           "requiredChecks":  "tests",
+                                           "escalateOnControlPlane":  false,
+                                           "escalationLevel":  "standard"
+                                       },
+                               "critical":  {
+                                                "requiredChecks":  [
+                                                                       "tests",
+                                                                       "lint",
+                                                                       "typecheck",
+                                                                       "build"
+                                                                   ],
+                                                "escalateOnControlPlane":  true,
+                                                "escalationLevel":  "critical"
+                                            },
+                               "medium":  {
+                                              "requiredChecks":  [
+                                                                     "tests",
+                                                                     "lint"
+                                                                 ],
+                                              "escalateOnControlPlane":  true,
+                                              "escalationLevel":  "elevated"
+                                          },
+                               "high":  {
+                                            "requiredChecks":  [
+                                                                   "tests",
+                                                                   "lint",
+                                                                   "typecheck"
+                                                               ],
+                                            "escalateOnControlPlane":  true,
+                                            "escalationLevel":  "high"
+                                        }
+                           },
+                 "enabled":  true
+             }
+}
